@@ -11,27 +11,25 @@ import (
 	"github.com/absfs/osfs"
 )
 
-const O_ACCESS = 0x3
-
 func TestOSFS(t *testing.T) {
 
-	var testfs absfs.FileSystem
+	var ofs absfs.FileSystem
 
 	t.Run("NewFs", func(t *testing.T) {
-		fs, err := osfs.NewFs()
+		fs, err := osfs.NewFS()
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		testfs = fs
+		ofs = fs
 	})
 
 	t.Run("Separators", func(t *testing.T) {
-		if testfs.Separator() != filepath.Separator {
-			t.Errorf("incorrect separator %q", testfs.Separator())
+		if ofs.Separator() != filepath.Separator {
+			t.Errorf("incorrect separator %q", ofs.Separator())
 		}
-		if testfs.ListSeparator() != filepath.ListSeparator {
-			t.Errorf("incorrect list separator %q", testfs.ListSeparator())
+		if ofs.ListSeparator() != filepath.ListSeparator {
+			t.Errorf("incorrect list separator %q", ofs.ListSeparator())
 		}
 	})
 
@@ -42,18 +40,18 @@ func TestOSFS(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		fswd, err := testfs.Getwd()
+		fswd, err := ofs.Getwd()
 		if fswd != oswd {
 			t.Fatalf("incorrect working directory %q, %q", fswd, oswd)
 		}
 
 		cwd := "/"
-		err = testfs.Chdir(cwd)
+		err = ofs.Chdir(cwd)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		fswd, err = testfs.Getwd()
+		fswd, err = ofs.Getwd()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -65,7 +63,7 @@ func TestOSFS(t *testing.T) {
 
 	t.Run("TempDir", func(t *testing.T) {
 
-		ostmp, fstmp := os.TempDir(), testfs.TempDir()
+		ostmp, fstmp := os.TempDir(), ofs.TempDir()
 		if fstmp != ostmp {
 			t.Fatalf("wrong TempDir output: %q != %q", fstmp, ostmp)
 		}
@@ -73,103 +71,67 @@ func TestOSFS(t *testing.T) {
 	})
 
 	// Move to the test directory for all further tests
-	testdir, cleanup, err := fstesting.OsTestDir(os.TempDir())
-
+	testdir, cleanup, err := fstesting.FsTestDir(ofs, ofs.TempDir())
+	defer cleanup()
 	if err != nil {
-		cleanup()
 		t.Fatal(err)
 	}
+	maxerrors := 10
 
-	testcases, err := fstesting.GenerateTestcases(testdir, func(testcase *fstesting.Testcase) error {
-		// Testcase counter
-		// if testcase.TestNo > 10 {
-		// 	return errors.New("stop")
-		// }
-		// fmt.Printf("  %10d %s%*s\r", testcase.TestNo, testcase.Path, len(testcase.Path)-100, " ")
-		fmt.Printf("  %10d Generated Testcases\r", testcase.TestNo)
+	fstesting.AutoTest(func(testcase *fstesting.Testcase) error {
+		result, err := fstesting.FsTest(ofs, testdir, testcase)
+		if err != nil {
+			t.Fatal(err)
+		}
+		Errors := result.Errors
+
+		for op, report := range testcase.Errors {
+			if Errors[op] == nil {
+				t.Logf("expected: \n%s\n", testcase.Report())
+				t.Logf("  result: \n%s\n", result.Report())
+				t.Fatalf("%d: On %q got nil but expected to get an err of type (%T)\n", testcase.TestNo, op, testcase.Errors[op].Type())
+				continue
+			}
+			if report.Err == nil {
+				if Errors[op].Err == nil {
+					continue
+				}
+
+				t.Logf("expected: \n%s\n", testcase.Report())
+				t.Logf("  result: \n%s\n", result.Report())
+				t.Fatalf("%d: On %q expected `err == nil` but got err: (%T) %q\n%s", testcase.TestNo, op, Errors[op].Type(), Errors[op].String(), Errors[op].Stack())
+				maxerrors--
+				continue
+			}
+
+			if Errors[op].Err == nil {
+				t.Logf("expected: \n%s\n", testcase.Report())
+				t.Logf("  result: \n%s\n", result.Report())
+				t.Fatalf("%d: On %q got `err == nil` but expected err: (%T) %q\n%s", testcase.TestNo, op, testcase.Errors[op].Type(), testcase.Errors[op].String(), Errors[op].Stack())
+				maxerrors--
+			}
+			if !report.TypesEqual(Errors[op]) {
+				t.Logf("expected: \n%s\n", testcase.Report())
+				t.Logf("  result: \n%s\n", result.Report())
+				t.Fatalf("%d: On %q got different error types, expected (%T) but got (%T)\n%s", testcase.TestNo, op, testcase.Errors[op].Type(), Errors[op].Type(), Errors[op].Stack())
+				maxerrors--
+			}
+			if !report.Equal(Errors[op]) {
+				t.Logf("expected: \n%s\n", testcase.Report())
+				t.Logf("  result: \n%s\n", result.Report())
+				t.Fatalf("%d: On %q got different error values, expected %q but got %q\n%s", testcase.TestNo, op, testcase.Errors[op], Errors[op].String(), Errors[op].Stack())
+				maxerrors--
+			}
+
+			if maxerrors < 1 {
+				t.Fatal("too many errors")
+			}
+			fmt.Printf("  %10d Tests\r", testcase.TestNo)
+		}
 		return nil
 	})
 	if err != nil && err.Error() != "stop" {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("\n")
-	if len(testcases) < 10 {
-		t.Fatalf("Number of test cases too small: %d", len(testcases))
-	}
-	t.Logf("Number of test cases: %d", len(testcases))
-	cleanup()
-
-	tmp := filepath.Join(testfs.TempDir(), "osfs_test")
-	if _, err := testfs.Stat(tmp); os.IsNotExist(err) {
-		err = os.Mkdir(tmp, 0777)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	testdir, cleanup, err = fstesting.FsTestDir(testfs, tmp)
-	defer cleanup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	maxerrors := 10
-	for _, testcase := range testcases {
-
-		result, err := fstesting.FsTest(testfs, testdir, testcase)
-
-		if testcase.OpenErr != nil {
-			if result.OpenErr == nil {
-				t.Fatalf("%d: %s, expected error %v", testcase.TestNo, testcase.Path, testcase.OpenErr)
-			} else {
-				err := fstesting.CompareErrors(result.OpenErr, testcase.OpenErr)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-		}
-
-		if testcase.WriteErr != nil {
-			if result.WriteErr == nil {
-				t.Fatalf("%d: %s, expected error %v", testcase.TestNo, testcase.Path, testcase.WriteErr)
-			} else {
-				err := fstesting.CompareErrors(result.WriteErr, testcase.WriteErr)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-		}
-
-		if testcase.ReadErr != nil {
-			if result.ReadErr == nil {
-				t.Fatalf("%d: %s, expected error %v", testcase.TestNo, testcase.Path, testcase.ReadErr)
-			} else {
-				err := fstesting.CompareErrors(result.ReadErr, testcase.ReadErr)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-		}
-
-		if testcase.CloseErr != nil {
-			if result.CloseErr == nil {
-				t.Fatalf("%d: %s, expected error %v", testcase.TestNo, testcase.Path, testcase.CloseErr)
-			} else {
-				err := fstesting.CompareErrors(result.CloseErr, testcase.CloseErr)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-		}
-		fmt.Printf("  %10d File System Tests \r", testcase.TestNo)
-		if err == nil {
-			continue
-		}
-
-		if maxerrors <= 0 {
-			t.Fatal(err)
-		}
-		t.Error(err)
-		maxerrors--
-	}
 }

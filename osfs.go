@@ -13,7 +13,7 @@ type FileSystem struct {
 	cwd string
 }
 
-func NewFs() (*FileSystem, error) {
+func NewFS() (*FileSystem, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return nil, nil
