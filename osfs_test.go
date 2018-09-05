@@ -78,7 +78,7 @@ func TestOSFS(t *testing.T) {
 	}
 	maxerrors := 10
 
-	fstesting.AutoTest(func(testcase *fstesting.Testcase) error {
+	fstesting.AutoTest(0, func(testcase *fstesting.Testcase) error {
 		result, err := fstesting.FsTest(ofs, testdir, testcase)
 		if err != nil {
 			t.Fatal(err)
