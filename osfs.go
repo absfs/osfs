@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/absfs/absfs"
+	"github.com/absfs/osfs/fastwalk"
 )
 
 type FileSystem struct {
@@ -119,6 +120,10 @@ func (fs *FileSystem) Remove(name string) error {
 	return os.Remove(fs.fixPath(name))
 }
 
+func (fs *FileSystem) Rename(oldpath, newpath string) error {
+	return os.Rename(fs.fixPath(oldpath), fs.fixPath(newpath))
+}
+
 func (fs *FileSystem) RemoveAll(name string) error {
 	return os.RemoveAll(fs.fixPath(name))
 }
@@ -158,4 +163,12 @@ func (fs *FileSystem) Readlink(name string) (string, error) {
 
 func (fs *FileSystem) Symlink(oldname, newname string) error {
 	return os.Symlink(fs.fixPath(oldname), fs.fixPath(newname))
+}
+
+func (fs *FileSystem) Walk(path string, fn func(string, os.FileInfo, error) error) error {
+	return filepath.Walk(path, fn) //(filepath.WalkFunc)(fn))
+}
+
+func (fs *FileSystem) FastWalk(path string, fn func(string, os.FileMode) error) error {
+	return fastwalk.Walk(path, fn)
 }
