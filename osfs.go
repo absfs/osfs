@@ -17,7 +17,7 @@ type FileSystem struct {
 func NewFS() (*FileSystem, error) {
 	dir, err := os.Getwd()
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 
 	return &FileSystem{dir}, nil
