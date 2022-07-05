@@ -1,7 +1,7 @@
 # osfs - Abstract File System interface
 `osfs` package implements the absfs.FileSystem interface using the `os` standard library file access functions.
 
-## Install 
+## Install
 
 ```bash
 $ go get github.com/absfs/osfs
@@ -12,28 +12,47 @@ $ go get github.com/absfs/osfs
 ```go
 package main
 
-import(
-    "fmt"
-    "os"
+import (
+	"log"
+	"os"
 
-    "github.com/absfs/osfs"
+	"github.com/absfs/osfs"
 )
 
-func main() {
-    fs, _ := osfs.NewFs() // remember kids don't ignore errors
-
-    // Opens a file with read/write permissions in the current directory
-    f, _ := fs.Create("example.txt")  
-    
-    f.Write([]byte("Hello, world!"))
-    f.Close()
-
-    fs.Remove("example.txt")
+func ExitOnError(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
 }
+
+func main() {
+	fs, err := osfs.NewFS()
+	ExitOnError(err)
+
+	f, err := fs.Create("example.txt")
+	ExitOnError(err)
+
+	_, err = f.Write([]byte("Hello, world!\n"))
+	ExitOnError(err)
+
+	err = f.Close()
+	ExitOnError(err)
+
+	// if "keep" is passed as the first argument, don't delete the file
+	if len(os.Args) > 1 && os.Args[1] == "keep" {
+		return
+	}
+
+	// delete the file
+	err = fs.Remove("example.txt")
+	ExitOnError(err)
+}
+
+
 ```
 
 ## absfs
-Check out the [`absfs`](https://github.com/absfs/absfs) repo for more information about the abstract filesystem interface and features like filesystem composition 
+Check out the [`absfs`](https://github.com/absfs/absfs) repo for more information about the abstract filesystem interface and features like filesystem composition
 
 ## LICENSE
 
