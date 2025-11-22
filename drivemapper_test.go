@@ -3,7 +3,6 @@
 package osfs
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
