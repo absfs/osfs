@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package osfs
@@ -22,12 +23,13 @@ import (
 //   - Relative paths → Pass through unchanged
 //
 // Example:
-//   fs, _ := osfs.NewFS()
-//   mapped := osfs.NewWindowsDriveMapper(fs, "C:")
 //
-//   mapped.Create("/config/app.json")      // → C:\config\app.json
-//   mapped.Open("C:\\Windows\\file.txt")   // → C:\Windows\file.txt (unchanged)
-//   mapped.MkdirAll("/var/log", 0755)      // → C:\var\log
+//	fs, _ := osfs.NewFS()
+//	mapped := osfs.NewWindowsDriveMapper(fs, "C:")
+//
+//	mapped.Create("/config/app.json")      // → C:\config\app.json
+//	mapped.Open("C:\\Windows\\file.txt")   // → C:\Windows\file.txt (unchanged)
+//	mapped.MkdirAll("/var/log", 0755)      // → C:\var\log
 type WindowsDriveMapper struct {
 	base  absfs.FileSystem
 	drive string

@@ -1,3 +1,4 @@
+//go:build !windows
 // +build !windows
 
 package osfs
@@ -11,12 +12,13 @@ import "github.com/absfs/absfs"
 // runs correctly on all platforms without conditional compilation in user code.
 //
 // Example:
-//   // This code works on all platforms:
-//   fs, _ := osfs.NewFS()
-//   mapped := osfs.NewWindowsDriveMapper(fs, "C:")
-//   mapped.Create("/config/app.json")
-//   // On Unix/macOS: creates /config/app.json
-//   // On Windows: creates C:\config\app.json
+//
+//	// This code works on all platforms:
+//	fs, _ := osfs.NewFS()
+//	mapped := osfs.NewWindowsDriveMapper(fs, "C:")
+//	mapped.Create("/config/app.json")
+//	// On Unix/macOS: creates /config/app.json
+//	// On Windows: creates C:\config\app.json
 func NewWindowsDriveMapper(base absfs.FileSystem, drive string) absfs.FileSystem {
 	return base
 }

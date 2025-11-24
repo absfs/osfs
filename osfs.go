@@ -132,17 +132,17 @@ func (fs *FileSystem) Stat(name string) (os.FileInfo, error) {
 	return os.Stat(fs.fixPath(name))
 }
 
-//Chmod changes the mode of the named file to mode.
+// Chmod changes the mode of the named file to mode.
 func (fs *FileSystem) Chmod(name string, mode os.FileMode) error {
 	return os.Chmod(fs.fixPath(name), mode)
 }
 
-//Chtimes changes the access and modification times of the named file
+// Chtimes changes the access and modification times of the named file
 func (fs *FileSystem) Chtimes(name string, atime time.Time, mtime time.Time) error {
 	return os.Chtimes(fs.fixPath(name), atime, mtime)
 }
 
-//Chown changes the owner and group ids of the named file
+// Chown changes the owner and group ids of the named file
 func (fs *FileSystem) Chown(name string, uid, gid int) error {
 	return os.Chown(fs.fixPath(name), uid, gid)
 }
