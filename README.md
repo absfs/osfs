@@ -184,6 +184,42 @@ cwd, err := fs.Getwd()
 
 See [example_drivemapper_test.go](example_drivemapper_test.go) for complete Windows drive mapping examples.
 
+## Advanced Operations
+
+### Directory Walking
+
+For advanced directory traversal operations on absfs filesystems, use the [fstools](https://github.com/absfs/fstools) package:
+
+```go
+import (
+    "github.com/absfs/fstools"
+    "github.com/absfs/osfs"
+)
+
+fs, _ := osfs.NewFS()
+
+// Simple walk compatible with filepath.WalkFunc
+err := fstools.Walk(fs, "/path", func(path string, info os.FileInfo, err error) error {
+    fmt.Println(path)
+    return nil
+})
+
+// Walk with options for different traversal strategies
+options := &fstools.Options{
+    Sort:      true,
+    Traversal: fstools.BreadthTraversal,  // Also: PreOrder, PostOrder, KeyOrder
+}
+err = fstools.WalkWithOptions(fs, options, "/path", walkFunc)
+```
+
+The fstools package provides:
+- **Multiple traversal strategies**: PreOrder, PostOrder, BreadthFirst, and KeyOrder (files only)
+- **Sorting options**: Custom sort functions or alphabetical
+- **Filesystem operations**: Copy, Describe, Diff, Patch, and Apply
+- **Works with any absfs.Filer implementation**
+
+See [github.com/absfs/fstools](https://github.com/absfs/fstools) for complete documentation.
+
 ## Documentation
 
 - [absfs Documentation](https://github.com/absfs/absfs) - Main abstraction interface
@@ -194,6 +230,7 @@ See [example_drivemapper_test.go](example_drivemapper_test.go) for complete Wind
 ## Related Packages
 
 - [absfs](https://github.com/absfs/absfs) - Core filesystem abstraction
+- [fstools](https://github.com/absfs/fstools) - Advanced filesystem operations (Walk, Copy, Diff, Patch)
 - [memfs](https://github.com/absfs/memfs) - In-memory filesystem
 - [basefs](https://github.com/absfs/basefs) - Chroot filesystem wrapper
 - [rofs](https://github.com/absfs/rofs) - Read-only filesystem wrapper
