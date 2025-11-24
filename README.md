@@ -8,7 +8,6 @@
 - **Cross-Platform Support**: Works on Unix, macOS, and Windows
 - **Windows Drive Mapping**: `WindowsDriveMapper` for seamless Unix-style paths on Windows
 - **Full absfs Compatibility**: Implements the complete absfs.FileSystem interface
-- **FastWalk Support**: High-performance directory traversal
 
 ## Install
 

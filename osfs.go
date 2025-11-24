@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/absfs/absfs"
-	"github.com/absfs/osfs/fastwalk"
 )
 
 type FileSystem struct {
@@ -167,8 +166,4 @@ func (fs *FileSystem) Symlink(oldname, newname string) error {
 
 func (fs *FileSystem) Walk(path string, fn func(string, os.FileInfo, error) error) error {
 	return filepath.Walk(path, fn) //(filepath.WalkFunc)(fn))
-}
-
-func (fs *FileSystem) FastWalk(path string, fn func(string, os.FileMode) error) error {
-	return fastwalk.Walk(path, fn)
 }

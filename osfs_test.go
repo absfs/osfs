@@ -5,13 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/absfs/absfs"
 	"github.com/absfs/fstesting"
 	"github.com/absfs/osfs"
-	"github.com/absfs/osfs/fastwalk"
 )
 
 func TestInterface(t *testing.T) {
@@ -63,50 +61,6 @@ func TestWalk(t *testing.T) {
 			}
 			delete(list, p)
 			count2++
-			return nil
-		})
-		if err != nil {
-			t.Error(err)
-		}
-		if count < 10 || count != count2 {
-			t.Errorf("incorrect file count: %d, %d", count, count2)
-		}
-		if len(list) > 0 {
-			for k := range list {
-				t.Errorf("path not removed %q", k)
-			}
-		}
-	})
-
-	t.Run("FastWalk", func(t *testing.T) {
-		list := make(map[string]bool)
-		count := 0
-		x := sync.Mutex{}
-		err = fastwalk.Walk(testpath, func(path string, mode os.FileMode) error {
-			p := strings.TrimPrefix(path, testpath)
-			if p == "" {
-				p = "/"
-			}
-			x.Lock()
-			list[p] = true
-			count++
-			x.Unlock()
-			return nil
-		})
-
-		count2 := 0
-		err = fs.FastWalk(testpath, func(path string, mode os.FileMode) error {
-			p := strings.TrimPrefix(path, testpath)
-			if p == "" {
-				p = "/"
-			}
-			x.Lock()
-			if !list[p] {
-				return fmt.Errorf("file not found %q", p)
-			}
-			delete(list, p)
-			count2++
-			x.Unlock()
 			return nil
 		})
 		if err != nil {
