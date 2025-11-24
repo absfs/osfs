@@ -1,157 +1,207 @@
-# osfs - OS Filesystem Implementation for absfs
+# osfs - Operating System Filesystem
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/absfs/osfs.svg)](https://pkg.go.dev/github.com/absfs/osfs)
+`osfs` provides an [absfs](https://github.com/absfs/absfs) FileSystem implementation that wraps the Go standard library's `os` package for direct operating system filesystem access.
 
-Package `osfs` provides an implementation of the `absfs.FileSystem` interface that wraps the standard Go `os` package, allowing direct interaction with the operating system's filesystem.
+## Features
 
-## Installation
+- **Native OS Access**: Direct access to your operating system's filesystem
+- **Cross-Platform Support**: Works on Unix, macOS, and Windows
+- **Windows Drive Mapping**: `WindowsDriveMapper` for seamless Unix-style paths on Windows
+- **Full absfs Compatibility**: Implements the complete absfs.FileSystem interface
+- **FastWalk Support**: High-performance directory traversal
+
+## Install
 
 ```bash
 go get github.com/absfs/osfs
 ```
 
-## Basic Usage
+## Quick Start
+
+### Basic Usage
 
 ```go
+package main
+
+import (
+	"log"
+	"github.com/absfs/osfs"
+)
+
+func main() {
+	fs, err := osfs.NewFS()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create and write to a file
+	f, err := fs.Create("example.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	_, err = f.Write([]byte("Hello, world!\n"))
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+### Cross-Platform Applications
+
+For applications that need to work across Unix and Windows, use the build tag pattern with `WindowsDriveMapper`:
+
+**Create `filesystem_windows.go`:**
+```go
+//go:build windows
+
+package myapp
+
 import "github.com/absfs/osfs"
 
-// Create a new OS filesystem
-fs, err := osfs.NewFS()
-if err != nil {
-    log.Fatal(err)
+func NewFS(drive string) absfs.FileSystem {
+	if drive == "" {
+		drive = "C:"
+	}
+	fs, _ := osfs.NewFS()
+	return osfs.NewWindowsDriveMapper(fs, drive)
 }
-
-// Use it like any absfs.FileSystem
-file, err := fs.Create("/path/to/file.txt")
-if err != nil {
-    log.Fatal(err)
-}
-defer file.Close()
 ```
 
-## Features
-
-- **Full absfs.FileSystem implementation**: Implements all methods of the absfs interface
-- **Direct OS access**: All operations map directly to Go's `os` package
-- **Working directory management**: Maintains an internal working directory
-- **Cross-platform**: Works on Unix, Linux, macOS, and Windows
-- **Fast filesystem walking**: Includes optimized `FastWalk` implementation
-
-## Windows Drive Mapping
-
-On Windows, the `WindowsDriveMapper` wrapper provides intuitive path translation for cross-platform code:
-
+**Create `filesystem_unix.go`:**
 ```go
+//go:build !windows
+
+package myapp
+
 import "github.com/absfs/osfs"
 
-// Create a mapper that translates virtual-absolute paths
-fs, err := osfs.NewFS()
-if err != nil {
-    log.Fatal(err)
+func NewFS(drive string) absfs.FileSystem {
+	fs, _ := osfs.NewFS()
+	return fs
 }
-mapped := osfs.NewWindowsDriveMapper(fs, "C:")
-
-// Unix-style paths automatically map to Windows paths
-mapped.Create("/config/app.json")      // → C:\config\app.json
-mapped.MkdirAll("/var/log/app", 0755)  // → C:\var\log\app
-
-// OS-absolute paths pass through unchanged
-mapped.Open("C:\\Windows\\file.txt")   // → C:\Windows\file.txt
-mapped.Open("D:\\Data\\file.txt")      // → D:\Data\file.txt
-
-// UNC paths work correctly
-mapped.Open("\\\\server\\share\\file") // → \\server\share\file
-
-// On Unix/macOS, the mapper is a no-op
-mapped.Create("/config/app.json")      // → /config/app.json
 ```
 
-### When to use WindowsDriveMapper
-
-**Use it when:**
-- Writing cross-platform CLI tools that work with OS filesystems
-- Porting Unix-based tools to Windows
-- You want `/path` semantics to map to `C:\path` on Windows
-
-**Don't use it when:**
-- Working with virtual/in-memory filesystems (use base absfs)
-- You need full control over Windows drive letters in your code
-- Testing with mock filesystems
-
-See [absfs PATH_HANDLING.md](https://github.com/absfs/absfs/blob/main/PATH_HANDLING.md) for more details on cross-platform path handling.
-
-### Custom Drive Letters
-
-You can specify a different drive letter:
-
+**Use it everywhere:**
 ```go
-// Use D: drive instead of C:
-mapped := osfs.NewWindowsDriveMapper(fs, "D:")
-mapped.Create("/data/file.txt")  // → D:\data\file.txt
+package main
+
+import "myapp"
+
+func main() {
+	fs := myapp.NewFS("")
+
+	// Works identically on all platforms!
+	fs.Create("/config/app.json")      // → /config/app.json on Unix, C:\config\app.json on Windows
+	fs.MkdirAll("/var/log/app", 0755)  // → /var/log/app on Unix, C:\var\log\app on Windows
+}
 ```
 
-If you don't specify a drive, it defaults to `C:`.
+See the [absfs PATH_HANDLING.md](https://github.com/absfs/absfs/blob/master/PATH_HANDLING.md) guide for complete cross-platform patterns.
 
-## API Overview
+## WindowsDriveMapper
 
-The `FileSystem` type implements the following methods:
-
-### File Operations
-- `Open(name string) (absfs.File, error)`
-- `Create(name string) (absfs.File, error)`
-- `OpenFile(name string, flag int, perm os.FileMode) (absfs.File, error)`
-- `Truncate(name string, size int64) error`
-
-### Directory Operations
-- `Mkdir(name string, perm os.FileMode) error`
-- `MkdirAll(path string, perm os.FileMode) error`
-- `Remove(name string) error`
-- `RemoveAll(path string) error`
-- `Chdir(dir string) error`
-- `Getwd() (dir string, err error)`
-
-### File Information
-- `Stat(name string) (os.FileInfo, error)`
-- `Lstat(name string) (os.FileInfo, error)`
-
-### File Attributes
-- `Chmod(name string, mode os.FileMode) error`
-- `Chtimes(name string, atime time.Time, mtime time.Time) error`
-- `Chown(name string, uid, gid int) error`
-- `Lchown(name string, uid, gid int) error`
-
-### Path Operations
-- `Rename(oldpath, newpath string) error`
-- `Symlink(oldname, newname string) error`
-- `Readlink(name string) (string, error)`
-
-### Filesystem Walking
-- `Walk(path string, fn func(string, os.FileInfo, error) error) error`
-- `FastWalk(path string, fn func(string, os.FileMode) error) error`
-
-### System Information
-- `Separator() uint8` - Returns the OS-specific path separator
-- `ListSeparator() uint8` - Returns the OS-specific list separator
-- `TempDir() string` - Returns the temporary directory path
-
-## FastWalk
-
-The `FastWalk` method provides optimized filesystem traversal:
+The `WindowsDriveMapper` enables Unix-style absolute paths on Windows by translating virtual-absolute paths to Windows drive paths:
 
 ```go
 fs, _ := osfs.NewFS()
-err := fs.FastWalk("/path/to/dir", func(path string, mode os.FileMode) error {
-    fmt.Println(path, mode)
-    return nil
-})
+mapped := osfs.NewWindowsDriveMapper(fs, "C:")
+
+// Unix-style paths work on Windows
+mapped.Create("/tmp/config.json")    // Creates C:\tmp\config.json
+mapped.MkdirAll("/var/log", 0755)    // Creates C:\var\log
+
+// OS-absolute paths pass through unchanged
+mapped.Open("C:\\Windows\\file.txt") // Opens C:\Windows\file.txt
+mapped.Open("\\\\server\\share\\f")  // Opens UNC path \\server\share\f
 ```
 
-FastWalk is significantly faster than `Walk` for large directory trees because it avoids unnecessary stat calls.
+### Path Translation Rules
+
+| Input Path | Windows Result | Notes |
+|------------|----------------|-------|
+| `/config/app.json` | `C:\config\app.json` | Virtual-absolute → mapped to drive |
+| `C:\Windows\file` | `C:\Windows\file` | OS-absolute → pass through |
+| `\\server\share\f` | `\\server\share\f` | UNC path → pass through |
+| `relative/path` | `relative\path` | Relative → pass through |
+
+## API Overview
+
+### Creating Filesystems
+
+```go
+// Standard OS filesystem
+fs, err := osfs.NewFS()
+
+// With Windows drive mapping (Windows only)
+mapped := osfs.NewWindowsDriveMapper(fs, "D:")
+```
+
+### File Operations
+
+```go
+// Open files
+f, err := fs.Open("/path/to/file.txt")
+f, err := fs.Create("/path/to/new.txt")
+f, err := fs.OpenFile("/path", os.O_RDWR|os.O_CREATE, 0644)
+
+// File info
+info, err := fs.Stat("/path/to/file.txt")
+
+// Remove files
+err = fs.Remove("/path/to/file.txt")
+```
+
+### Directory Operations
+
+```go
+// Create directories
+err = fs.Mkdir("/path/to/dir", 0755)
+err = fs.MkdirAll("/path/to/nested/dirs", 0755)
+
+// Remove directories
+err = fs.Remove("/empty/dir")
+err = fs.RemoveAll("/path/to/dir")
+```
+
+### Additional Operations
+
+```go
+// Rename/move
+err = fs.Rename("/old/path", "/new/path")
+
+// Permissions and attributes
+err = fs.Chmod("/path/to/file", 0644)
+err = fs.Chtimes("/path/to/file", atime, mtime)
+err = fs.Chown("/path/to/file", uid, gid)
+
+// Working directory
+err = fs.Chdir("/new/directory")
+cwd, err := fs.Getwd()
+```
+
+## Examples
+
+See [example_drivemapper_test.go](example_drivemapper_test.go) for complete Windows drive mapping examples.
+
+## Documentation
+
+- [absfs Documentation](https://github.com/absfs/absfs) - Main abstraction interface
+- [PATH_HANDLING.md](https://github.com/absfs/absfs/blob/master/PATH_HANDLING.md) - Cross-platform path handling
+- [USER_GUIDE.md](https://github.com/absfs/absfs/blob/master/USER_GUIDE.md) - Complete usage guide
+- [GoDoc](https://pkg.go.dev/github.com/absfs/osfs) - API reference
+
+## Related Packages
+
+- [absfs](https://github.com/absfs/absfs) - Core filesystem abstraction
+- [memfs](https://github.com/absfs/memfs) - In-memory filesystem
+- [basefs](https://github.com/absfs/basefs) - Chroot filesystem wrapper
+- [rofs](https://github.com/absfs/rofs) - Read-only filesystem wrapper
 
 ## License
 
-See the main [absfs repository](https://github.com/absfs/absfs) for license information.
+This project is governed by the MIT License. See [LICENSE](https://github.com/absfs/osfs/blob/master/LICENSE)
 
-## Contributing
 
-Contributions are welcome! Please see the main [absfs repository](https://github.com/absfs/absfs) for contribution guidelines.
+
