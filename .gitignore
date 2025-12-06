@@ -13,3 +13,8 @@
 
 # Automatically generated test cases.
 tests.json
+
+# Claude-related directories and files
+.claude/
+CLAUDE.md
+.project_meta/
