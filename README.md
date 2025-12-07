@@ -1,5 +1,10 @@
 # osfs - Operating System Filesystem
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/absfs/osfs.svg)](https://pkg.go.dev/github.com/absfs/osfs)
+[![Go Report Card](https://goreportcard.com/badge/github.com/absfs/osfs)](https://goreportcard.com/report/github.com/absfs/osfs)
+[![CI](https://github.com/absfs/osfs/actions/workflows/ci.yml/badge.svg)](https://github.com/absfs/osfs/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 `osfs` provides an [absfs](https://github.com/absfs/absfs) FileSystem implementation that wraps the Go standard library's `os` package for direct operating system filesystem access.
 
 ## Features
