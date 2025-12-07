@@ -111,8 +111,9 @@ func TestOSFS(t *testing.T) {
 			t.Fatalf("incorrect working directory %q, %q", fswd, oswd)
 		}
 
-		cwd := "/"
-		err = ofs.Chdir(cwd)
+		// On Unix, "/" is the root. On Windows, we need to use the volume root
+		rootPath := "/"
+		err = ofs.Chdir(rootPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -121,8 +122,16 @@ func TestOSFS(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if fswd != cwd {
-			t.Fatalf("incorrect working directory %q, %q", fswd, cwd)
+
+		// Get the expected root directory for the platform
+		expectedRoot := filepath.VolumeName(oswd) + string(filepath.Separator)
+		if expectedRoot == string(filepath.Separator) {
+			// Unix: VolumeName is empty, so just use "/"
+			expectedRoot = "/"
+		}
+
+		if fswd != expectedRoot {
+			t.Fatalf("incorrect working directory %q, %q", fswd, expectedRoot)
 		}
 
 	})
@@ -146,7 +155,7 @@ func TestOSFSSuite(t *testing.T) {
 
 	suite := &fstesting.Suite{
 		FS:       fs,
-		Features: fstesting.DefaultFeatures(),
+		Features: fstesting.OSFeatures(),
 	}
 
 	suite.Run(t)
