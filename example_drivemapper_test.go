@@ -18,6 +18,11 @@ func ExampleNewWindowsDriveMapper() {
 	}
 	mapped := osfs.NewWindowsDriveMapper(fs, "C:")
 
+	// Create the directory first
+	if err := mapped.MkdirAll("/tmp", 0755); err != nil {
+		log.Fatal(err)
+	}
+
 	// Unix-style paths work intuitively on Windows
 	f, err := mapped.Create("/tmp/config.json")
 	if err != nil {
