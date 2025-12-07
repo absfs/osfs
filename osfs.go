@@ -40,6 +40,15 @@ func (fs *FileSystem) isDir(name string) bool {
 }
 
 func (fs *FileSystem) fixPath(name string) string {
+	// Handle "/" specially on Windows - it refers to the root of the current drive
+	if name == "/" && filepath.Separator == '\\' {
+		// Extract volume from current working directory and use as root
+		vol := filepath.VolumeName(fs.cwd)
+		if vol != "" {
+			return vol + string(filepath.Separator)
+		}
+	}
+
 	if !filepath.IsAbs(name) {
 		name = filepath.Join(fs.cwd, name)
 	}
