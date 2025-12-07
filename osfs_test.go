@@ -136,68 +136,18 @@ func TestOSFS(t *testing.T) {
 
 	})
 
-	// Move to the test directory for all further tests
-	testdir, cleanup, err := fstesting.FsTestDir(ofs, ofs.TempDir())
-	defer cleanup()
+}
+
+func TestOSFSSuite(t *testing.T) {
+	fs, err := osfs.NewFS()
 	if err != nil {
 		t.Fatal(err)
 	}
-	maxerrors := 10
 
-	fstesting.AutoTest(0, func(testcase *fstesting.Testcase) error {
-		result, err := fstesting.FsTest(ofs, testdir, testcase)
-		if err != nil {
-			t.Fatal(err)
-		}
-		Errors := result.Errors
-
-		for op, report := range testcase.Errors {
-			if Errors[op] == nil {
-				t.Logf("expected: \n%s\n", testcase.Report())
-				t.Logf("  result: \n%s\n", result.Report())
-				t.Fatalf("%d: On %q got nil but expected to get an err of type (%T)\n", testcase.TestNo, op, testcase.Errors[op].Type())
-				continue
-			}
-			if report.Err == nil {
-				if Errors[op].Err == nil {
-					continue
-				}
-
-				t.Logf("expected: \n%s\n", testcase.Report())
-				t.Logf("  result: \n%s\n", result.Report())
-				t.Fatalf("%d: On %q expected `err == nil` but got err: (%T) %q\n%s", testcase.TestNo, op, Errors[op].Type(), Errors[op].String(), Errors[op].Stack())
-				maxerrors--
-				continue
-			}
-
-			if Errors[op].Err == nil {
-				t.Logf("expected: \n%s\n", testcase.Report())
-				t.Logf("  result: \n%s\n", result.Report())
-				t.Fatalf("%d: On %q got `err == nil` but expected err: (%T) %q\n%s", testcase.TestNo, op, testcase.Errors[op].Type(), testcase.Errors[op].String(), Errors[op].Stack())
-				maxerrors--
-			}
-			if !report.TypesEqual(Errors[op]) {
-				t.Logf("expected: \n%s\n", testcase.Report())
-				t.Logf("  result: \n%s\n", result.Report())
-				t.Fatalf("%d: On %q got different error types, expected (%T) but got (%T)\n%s", testcase.TestNo, op, testcase.Errors[op].Type(), Errors[op].Type(), Errors[op].Stack())
-				maxerrors--
-			}
-			if !report.Equal(Errors[op]) {
-				t.Logf("expected: \n%s\n", testcase.Report())
-				t.Logf("  result: \n%s\n", result.Report())
-				t.Fatalf("%d: On %q got different error values, expected %q but got %q\n%s", testcase.TestNo, op, testcase.Errors[op], Errors[op].String(), Errors[op].Stack())
-				maxerrors--
-			}
-
-			if maxerrors < 1 {
-				t.Fatal("too many errors")
-			}
-			fmt.Printf("  %10d Tests\r", testcase.TestNo)
-		}
-		return nil
-	})
-	if err != nil && err.Error() != "stop" {
-		t.Fatal(err)
+	suite := &fstesting.Suite{
+		FS:       fs,
+		Features: fstesting.DefaultFeatures(),
 	}
 
+	suite.Run(t)
 }

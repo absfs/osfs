@@ -1,10 +1,8 @@
 module github.com/absfs/osfs
 
-go 1.16
+go 1.21
 
 require (
-	github.com/absfs/absfs v0.0.0-20200602175035-e49edc9fef15
-	github.com/absfs/fstesting v0.0.0-20180810212821-8b575cdeb80d
-	github.com/fatih/color v1.12.0 // indirect
-	github.com/xtgo/set v1.0.0 // indirect
+	github.com/absfs/absfs v0.0.0-20251109181304-77e2f9ac4448
+	github.com/absfs/fstesting v0.0.0-20251207001735-c9d62652ff82
 )
