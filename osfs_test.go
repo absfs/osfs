@@ -24,7 +24,6 @@ func TestInterface(t *testing.T) {
 }
 
 func TestWalk(t *testing.T) {
-
 	fs, err := osfs.NewFS()
 	if err != nil {
 		t.Fatal(err)
@@ -35,13 +34,16 @@ func TestWalk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testpath = abs
+	// Convert native path to Unix-style for comparison
+	testpathUnix := osfs.FromNative(abs)
 
 	t.Run("Walk", func(t *testing.T) {
 		list := make(map[string]bool)
 		count := 0
-		err = filepath.Walk(testpath, func(path string, info os.FileInfo, err error) error {
-			p := strings.TrimPrefix(path, testpath)
+		err = filepath.Walk(abs, func(path string, info os.FileInfo, err error) error {
+			// Convert to Unix-style and trim prefix
+			unixPath := osfs.FromNative(path)
+			p := strings.TrimPrefix(unixPath, testpathUnix)
 			if p == "" {
 				p = "/"
 			}
@@ -49,10 +51,14 @@ func TestWalk(t *testing.T) {
 			count++
 			return nil
 		})
+		if err != nil {
+			t.Fatalf("filepath.Walk failed: %v", err)
+		}
 
 		count2 := 0
-		err = fs.Walk(testpath, func(path string, info os.FileInfo, err error) error {
-			p := strings.TrimPrefix(path, testpath)
+		// fs.Walk expects Unix-style path and returns Unix-style paths
+		err = fs.Walk(testpathUnix, func(path string, info os.FileInfo, err error) error {
+			p := strings.TrimPrefix(path, testpathUnix)
 			if p == "" {
 				p = "/"
 			}
@@ -78,7 +84,6 @@ func TestWalk(t *testing.T) {
 }
 
 func TestOSFS(t *testing.T) {
-
 	var ofs absfs.FileSystem
 
 	t.Run("NewFs", func(t *testing.T) {
@@ -86,34 +91,38 @@ func TestOSFS(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		ofs = fs
 	})
 
 	t.Run("Separators", func(t *testing.T) {
-		if ofs.Separator() != filepath.Separator {
-			t.Errorf("incorrect separator %q", ofs.Separator())
+		// absfs always uses Unix-style separators regardless of platform
+		if ofs.Separator() != '/' {
+			t.Errorf("Separator() = %q, want '/'", ofs.Separator())
 		}
-		if ofs.ListSeparator() != filepath.ListSeparator {
-			t.Errorf("incorrect list separator %q", ofs.ListSeparator())
+		if ofs.ListSeparator() != ':' {
+			t.Errorf("ListSeparator() = %q, want ':'", ofs.ListSeparator())
 		}
 	})
 
 	t.Run("Navigation", func(t *testing.T) {
-
 		oswd, err := os.Getwd()
 		if err != nil {
 			t.Fatal(err)
 		}
 
+		// ofs.Getwd() returns Unix-style path
+		expectedWd := osfs.FromNative(oswd)
+
 		fswd, err := ofs.Getwd()
-		if fswd != oswd {
-			t.Fatalf("incorrect working directory %q, %q", fswd, oswd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fswd != expectedWd {
+			t.Fatalf("Getwd() = %q, want %q", fswd, expectedWd)
 		}
 
-		// On Unix, "/" is the root. On Windows, we need to use the volume root
-		rootPath := "/"
-		err = ofs.Chdir(rootPath)
+		// Change to root - on Windows this should stay on current drive
+		err = ofs.Chdir("/")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,28 +132,26 @@ func TestOSFS(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// Get the expected root directory for the platform
-		expectedRoot := filepath.VolumeName(oswd) + string(filepath.Separator)
-		if expectedRoot == string(filepath.Separator) {
-			// Unix: VolumeName is empty, so just use "/"
-			expectedRoot = "/"
+		// Get expected root: on Unix it's "/", on Windows it's "/c/" (drive from cwd)
+		expectedRoot := "/"
+		if drive := osfs.GetDrive(expectedWd); drive != "" {
+			expectedRoot = "/" + drive + "/"
 		}
 
 		if fswd != expectedRoot {
-			t.Fatalf("incorrect working directory %q, %q", fswd, expectedRoot)
+			t.Fatalf("after Chdir(/), Getwd() = %q, want %q", fswd, expectedRoot)
 		}
-
 	})
 
 	t.Run("TempDir", func(t *testing.T) {
+		ostmp := os.TempDir()
+		expectedTmp := osfs.FromNative(ostmp)
 
-		ostmp, fstmp := os.TempDir(), ofs.TempDir()
-		if fstmp != ostmp {
-			t.Fatalf("wrong TempDir output: %q != %q", fstmp, ostmp)
+		fstmp := ofs.TempDir()
+		if fstmp != expectedTmp {
+			t.Fatalf("TempDir() = %q, want %q", fstmp, expectedTmp)
 		}
-
 	})
-
 }
 
 func TestOSFSSuite(t *testing.T) {
