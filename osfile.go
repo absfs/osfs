@@ -3,7 +3,7 @@ package osfs
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 )
 
 type File struct {
@@ -11,9 +11,10 @@ type File struct {
 	f     *os.File
 }
 
-// Name returns the file name with Unix-style path separators.
+// Name returns the file name in Unix-style format.
+// On Windows, this includes the drive letter (e.g., "/c/Users/foo/file.txt").
 func (f *File) Name() string {
-	return filepath.ToSlash(f.f.Name())
+	return FromNative(f.f.Name())
 }
 
 func (f *File) Read(p []byte) (int, error) {
@@ -41,7 +42,9 @@ func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
 }
 
 func (f *File) Stat() (os.FileInfo, error) {
-	if !filepath.IsAbs(f.f.Name()) {
+	// Check if the Unix-style path is absolute
+	unixPath := FromNative(f.f.Name())
+	if !path.IsAbs(unixPath) {
 		panic("not absolute path: " + f.f.Name())
 	}
 	info, err := os.Lstat(f.f.Name())
