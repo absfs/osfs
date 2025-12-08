@@ -1,9 +1,7 @@
 package osfs
 
 import (
-	"fmt"
 	"os"
-	"path"
 )
 
 type File struct {
@@ -42,23 +40,7 @@ func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
 }
 
 func (f *File) Stat() (os.FileInfo, error) {
-	// Check if the Unix-style path is absolute
-	unixPath := FromNative(f.f.Name())
-	if !path.IsAbs(unixPath) {
-		panic("not absolute path: " + f.f.Name())
-	}
-	info, err := os.Lstat(f.f.Name())
-	if err != nil {
-		return info, err
-	}
-	if info.Mode()&os.ModeSymlink == os.ModeSymlink {
-		link, err := os.Readlink(f.f.Name())
-		if err != nil {
-			panic(err)
-		}
-		panic(fmt.Sprintf("symlink %q -> %q", f.f.Name(), link))
-	}
-	return info, err
+	return f.f.Stat()
 }
 
 func (f *File) Sync() error {
