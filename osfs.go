@@ -22,12 +22,18 @@ func NewFS() (*FileSystem, error) {
 	return &FileSystem{dir}, nil
 }
 
+// Separator returns the virtual path separator, which is always '/'.
+// This maintains consistency with the absfs contract that all virtual
+// filesystems use Unix-style paths regardless of the host OS.
 func (fs *FileSystem) Separator() uint8 {
-	return filepath.Separator
+	return '/'
 }
 
+// ListSeparator returns the virtual path list separator, which is always ':'.
+// This maintains consistency with the absfs contract that all virtual
+// filesystems use Unix-style paths regardless of the host OS.
 func (fs *FileSystem) ListSeparator() uint8 {
-	return filepath.ListSeparator
+	return ':'
 }
 
 func (fs *FileSystem) isDir(name string) bool {
@@ -64,12 +70,14 @@ func (fs *FileSystem) Chdir(name string) error {
 	return nil
 }
 
+// Getwd returns the current working directory with Unix-style path separators.
 func (fs *FileSystem) Getwd() (dir string, err error) {
-	return fs.cwd, nil
+	return filepath.ToSlash(fs.cwd), nil
 }
 
+// TempDir returns the OS temp directory with Unix-style path separators.
 func (fs *FileSystem) TempDir() string {
-	return os.TempDir()
+	return filepath.ToSlash(os.TempDir())
 }
 
 func (fs *FileSystem) Open(name string) (absfs.File, error) {
@@ -165,14 +173,22 @@ func (fs *FileSystem) Lchown(name string, uid, gid int) error {
 	return os.Lchown(fs.fixPath(name), uid, gid)
 }
 
+// Readlink returns the symlink target with Unix-style path separators.
 func (fs *FileSystem) Readlink(name string) (string, error) {
-	return os.Readlink(fs.fixPath(name))
+	target, err := os.Readlink(fs.fixPath(name))
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(target), nil
 }
 
 func (fs *FileSystem) Symlink(oldname, newname string) error {
 	return os.Symlink(fs.fixPath(oldname), fs.fixPath(newname))
 }
 
-func (fs *FileSystem) Walk(path string, fn func(string, os.FileInfo, error) error) error {
-	return filepath.Walk(path, fn) //(filepath.WalkFunc)(fn))
+// Walk traverses the directory tree, calling fn with Unix-style paths.
+func (fs *FileSystem) Walk(root string, fn func(string, os.FileInfo, error) error) error {
+	return filepath.Walk(fs.fixPath(root), func(path string, info os.FileInfo, err error) error {
+		return fn(filepath.ToSlash(path), info, err)
+	})
 }

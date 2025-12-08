@@ -11,8 +11,9 @@ type File struct {
 	f     *os.File
 }
 
+// Name returns the file name with Unix-style path separators.
 func (f *File) Name() string {
-	return f.f.Name()
+	return filepath.ToSlash(f.f.Name())
 }
 
 func (f *File) Read(p []byte) (int, error) {
