@@ -1,6 +1,7 @@
 package osfs
 
 import (
+	"io/fs"
 	"os"
 )
 
@@ -61,4 +62,19 @@ func (f *File) Truncate(size int64) error {
 
 func (f *File) WriteString(s string) (n int, err error) {
 	return f.f.WriteString(s)
+}
+
+// ReadDir reads the contents of the directory and returns a slice of up to n
+// DirEntry values in directory order. This delegates to the underlying os.File.ReadDir
+// which uses high-performance native OS directory reading APIs.
+//
+// If n > 0, ReadDir returns at most n entries. In this case, if ReadDir
+// returns an empty slice, it will return a non-nil error explaining why.
+// At the end of a directory, the error is io.EOF.
+//
+// If n <= 0, ReadDir returns all entries from the directory in a single slice.
+// In this case, if ReadDir succeeds (reads all the way to the end of the
+// directory), it returns the slice and a nil error.
+func (f *File) ReadDir(n int) ([]fs.DirEntry, error) {
+	return f.f.ReadDir(n)
 }

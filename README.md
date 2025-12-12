@@ -130,6 +130,25 @@ mapped.Open("\\\\server\\share\\f")  // Opens UNC path \\server\share\f
 | `\\server\share\f` | `\\server\share\f` | UNC path → pass through |
 | `relative/path` | `relative\path` | Relative → pass through |
 
+## Symbolic Links
+
+The `osfs` package provides full symbolic link support via the `absfs.SymLinker` interface:
+
+```go
+fs, _ := osfs.NewFS()
+
+// Create a symlink
+fs.Symlink("/path/to/target", "/path/to/link")
+
+// Read symlink target
+target, _ := fs.Readlink("/path/to/link")
+
+// Get symlink info without following
+info, _ := fs.Lstat("/path/to/link")
+```
+
+**Windows users**: Symlinks require elevated privileges or Developer Mode. See [SYMLINKS.md](SYMLINKS.md) for configuration instructions and platform-specific behavior.
+
 ## API Overview
 
 ### Creating Filesystems
@@ -227,6 +246,7 @@ See [github.com/absfs/fstools](https://github.com/absfs/fstools) for complete do
 
 ## Documentation
 
+- [SYMLINKS.md](SYMLINKS.md) - Symbolic link support and Windows configuration
 - [absfs Documentation](https://github.com/absfs/absfs) - Main abstraction interface
 - [PATH_HANDLING.md](https://github.com/absfs/absfs/blob/master/PATH_HANDLING.md) - Cross-platform path handling
 - [USER_GUIDE.md](https://github.com/absfs/absfs/blob/master/USER_GUIDE.md) - Complete usage guide

@@ -9,6 +9,7 @@ import (
 
 	"github.com/absfs/absfs"
 	"github.com/absfs/fstesting"
+	"github.com/absfs/fstools"
 	"github.com/absfs/osfs"
 )
 
@@ -56,8 +57,8 @@ func TestWalk(t *testing.T) {
 		}
 
 		count2 := 0
-		// fs.Walk expects Unix-style path and returns Unix-style paths
-		err = fs.Walk(testpathUnix, func(path string, info os.FileInfo, err error) error {
+		// fstools.Walk expects Unix-style path and returns Unix-style paths
+		err = fstools.Walk(fs, testpathUnix, func(path string, info os.FileInfo, err error) error {
 			p := strings.TrimPrefix(path, testpathUnix)
 			if p == "" {
 				p = "/"
@@ -92,16 +93,6 @@ func TestOSFS(t *testing.T) {
 			t.Fatal(err)
 		}
 		ofs = fs
-	})
-
-	t.Run("Separators", func(t *testing.T) {
-		// absfs always uses Unix-style separators regardless of platform
-		if ofs.Separator() != '/' {
-			t.Errorf("Separator() = %q, want '/'", ofs.Separator())
-		}
-		if ofs.ListSeparator() != ':' {
-			t.Errorf("ListSeparator() = %q, want ':'", ofs.ListSeparator())
-		}
 	})
 
 	t.Run("Navigation", func(t *testing.T) {

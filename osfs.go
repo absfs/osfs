@@ -2,9 +2,9 @@ package osfs
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
 	"time"
 
 	"github.com/absfs/absfs"
@@ -26,20 +26,6 @@ func NewFS() (*FileSystem, error) {
 	}
 
 	return &FileSystem{FromNative(dir)}, nil
-}
-
-// Separator returns the virtual path separator, which is always '/'.
-// This maintains consistency with the absfs contract that all virtual
-// filesystems use Unix-style paths regardless of the host OS.
-func (fs *FileSystem) Separator() uint8 {
-	return '/'
-}
-
-// ListSeparator returns the virtual path list separator, which is always ':'.
-// This maintains consistency with the absfs contract that all virtual
-// filesystems use Unix-style paths regardless of the host OS.
-func (fs *FileSystem) ListSeparator() uint8 {
-	return ':'
 }
 
 // isDir checks if a native path is a directory.
@@ -199,14 +185,34 @@ func (fs *FileSystem) Readlink(name string) (string, error) {
 }
 
 // Symlink creates a symbolic link.
+// The oldname (target) is stored exactly as given - it can be relative or absolute.
+// Only the newname (link location) is converted to a native path.
 func (fs *FileSystem) Symlink(oldname, newname string) error {
-	return os.Symlink(fs.toNativePath(oldname), fs.toNativePath(newname))
+	// Convert only the link location (newname) to native path.
+	// The target (oldname) should be stored as-is to preserve relative paths.
+	return os.Symlink(ToNative(oldname), fs.toNativePath(newname))
 }
 
-// Walk traverses the directory tree, calling fn with Unix-style paths.
-func (fs *FileSystem) Walk(root string, fn func(string, os.FileInfo, error) error) error {
-	nativeRoot := fs.toNativePath(root)
-	return filepath.Walk(nativeRoot, func(nativePath string, info os.FileInfo, err error) error {
-		return fn(FromNative(nativePath), info, err)
-	})
+// ReadDir reads the named directory and returns a list of directory entries.
+// Uses platform-specific optimizations for high-performance directory reading:
+// - Linux: syscall.Getdents with 32KB buffer (vs default 8KB)
+// - macOS: os.ReadDir (uses getattrlistbulk internally)
+// - Windows: FindFirstFileEx with optimizations
+// - Other platforms: os.ReadDir fallback
+func (fs *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
+	nativePath := fs.toNativePath(name)
+	return readDirOptimized(nativePath)
+}
+
+// ReadFile reads the named file and returns its contents.
+// Uses os.ReadFile for optimized file reading with proper size pre-allocation.
+func (fs *FileSystem) ReadFile(name string) ([]byte, error) {
+	nativePath := fs.toNativePath(name)
+	return os.ReadFile(nativePath)
+}
+
+// Sub returns an fs.FS corresponding to the subtree rooted at dir.
+// The directory must exist and be a valid directory.
+func (fs *FileSystem) Sub(dir string) (fs.FS, error) {
+	return absfs.FilerToFS(fs, dir)
 }

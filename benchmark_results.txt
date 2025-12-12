@@ -1,0 +1,44 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/absfs/osfs
+cpu: Apple M3 Max
+BenchmarkReadDir-16           	  106142	     22953 ns/op	    4440 B/op	      64 allocs/op
+BenchmarkFastWalk-16          	   13473	    177260 ns/op	   42037 B/op	     482 allocs/op
+BenchmarkStdlibWalk-16        	    6073	    380382 ns/op	   69648 B/op	     563 allocs/op
+BenchmarkReadDir/Small_10/Traditional_OpenReadClose-16         	   74776	     31587 ns/op	    5688 B/op	      41 allocs/op
+BenchmarkReadDir/Small_10/os.ReadDir-16                        	  144698	     16535 ns/op	    2648 B/op	      31 allocs/op
+BenchmarkReadDir/Small_10/osfs.ReadDir-16                      	  146559	     16558 ns/op	    2648 B/op	      31 allocs/op
+BenchmarkReadDir/Medium_100/Traditional_OpenReadClose-16       	   12201	    198389 ns/op	   45656 B/op	     314 allocs/op
+BenchmarkReadDir/Medium_100/os.ReadDir-16                      	   42462	     56329 ns/op	   13816 B/op	     214 allocs/op
+BenchmarkReadDir/Medium_100/osfs.ReadDir-16                    	   42776	     55999 ns/op	   13816 B/op	     214 allocs/op
+BenchmarkReadDir/Large_1000/Traditional_OpenReadClose-16       	    1291	   1837489 ns/op	  436380 B/op	    3017 allocs/op
+BenchmarkReadDir/Large_1000/os.ReadDir-16                      	    5551	    443152 ns/op	  116536 B/op	    2017 allocs/op
+BenchmarkReadDir/Large_1000/osfs.ReadDir-16                    	    5481	    441496 ns/op	  116536 B/op	    2017 allocs/op
+BenchmarkReadDir/VeryLarge_10000/Traditional_OpenReadClose-16  	      99	  23273640 ns/op	 4667187 B/op	   30024 allocs/op
+BenchmarkReadDir/VeryLarge_10000/os.ReadDir-16                 	     493	   4853544 ns/op	 1467326 B/op	   20024 allocs/op
+BenchmarkReadDir/VeryLarge_10000/osfs.ReadDir-16               	     495	   4846630 ns/op	 1467328 B/op	   20024 allocs/op
+BenchmarkReadFile/Small_1KB/Traditional_OpenReadClose-16       	  222878	     10471 ns/op	  97.80 MB/s	    1208 B/op	       4 allocs/op
+BenchmarkReadFile/Small_1KB/os.ReadFile-16                     	  208725	     11392 ns/op	  89.89 MB/s	    1544 B/op	       5 allocs/op
+BenchmarkReadFile/Small_1KB/osfs.ReadFile-16                   	  211047	     11426 ns/op	  89.62 MB/s	    1544 B/op	       5 allocs/op
+BenchmarkReadFile/Medium_100KB/Traditional_OpenReadClose-16    	  114038	     20704 ns/op	4945.86 MB/s	  106681 B/op	       4 allocs/op
+BenchmarkReadFile/Medium_100KB/os.ReadFile-16                  	  109278	     21555 ns/op	4750.74 MB/s	  106889 B/op	       5 allocs/op
+BenchmarkReadFile/Medium_100KB/osfs.ReadFile-16                	  111874	     21562 ns/op	4749.03 MB/s	  106889 B/op	       5 allocs/op
+BenchmarkReadFile/Large_10MB/Traditional_OpenReadClose-16      	    2218	   1085735 ns/op	9657.76 MB/s	10485953 B/op	       4 allocs/op
+BenchmarkReadFile/Large_10MB/os.ReadFile-16                    	    2624	   1071187 ns/op	9788.91 MB/s	10494353 B/op	       5 allocs/op
+BenchmarkReadFile/Large_10MB/osfs.ReadFile-16                  	    2395	   1058399 ns/op	9907.19 MB/s	10494354 B/op	       5 allocs/op
+BenchmarkWalk/DeepTree/filepath.Walk-16                        	   10000	    227922 ns/op	   30704 B/op	     218 allocs/op
+BenchmarkWalk/DeepTree/filepath.WalkDir-16                     	   13851	    174416 ns/op	   22688 B/op	     189 allocs/op
+BenchmarkWalk/DeepTree/osfs.Walk-16                            	   10000	    226848 ns/op	   30704 B/op	     218 allocs/op
+BenchmarkWalk/DeepTree/osfs.FastWalk-16                        	    9694	    243357 ns/op	   24412 B/op	     214 allocs/op
+BenchmarkWalk/WideTree/filepath.Walk-16                        	    3841	    618938 ns/op	  122008 B/op	    1054 allocs/op
+BenchmarkWalk/WideTree/filepath.WalkDir-16                     	    8809	    271216 ns/op	   66824 B/op	     825 allocs/op
+BenchmarkWalk/WideTree/osfs.Walk-16                            	    3944	    615662 ns/op	  122009 B/op	    1054 allocs/op
+BenchmarkWalk/WideTree/osfs.FastWalk-16                        	   10000	    206015 ns/op	   68848 B/op	     853 allocs/op
+BenchmarkFileOperations/Stat/os.Stat-16                        	 1759500	      1369 ns/op	     288 B/op	       2 allocs/op
+BenchmarkFileOperations/Stat/osfs.Stat-16                      	 1764054	      1359 ns/op	     288 B/op	       2 allocs/op
+BenchmarkFileOperations/Open/os.Open-16                        	  251461	      9504 ns/op	     184 B/op	       3 allocs/op
+BenchmarkFileOperations/Open/osfs.Open-16                      	  251782	      9548 ns/op	     200 B/op	       4 allocs/op
+BenchmarkPathConversion/FromNative-16                          	1000000000	         2.174 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPathConversion/ToNative-16                            	1000000000	         2.170 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/absfs/osfs	105.427s
