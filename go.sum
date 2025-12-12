@@ -1,3 +1,9 @@
+github.com/absfs/absfs v0.9.0 h1:x4QElpUqVRhflmLAMgOazqhxH2n4nBBht+SfryzZbSs=
+github.com/absfs/absfs v0.9.0/go.mod h1:IvFD36FQcMxLLZNhs2Lms+Uosc0G3AJ2JHOJIz8E5d8=
+github.com/absfs/fstesting v0.9.0 h1:gerPgzzC4yQKFcb0oWUFBNSYjq9NI+HOQ7HJ/FxjAcc=
+github.com/absfs/fstesting v0.9.0/go.mod h1:XO8fipRJWSxkBpt5ePdiOp+NllX2CxNU7OXCYCLDBfc=
+github.com/absfs/fstools v0.9.0 h1:vZ8mkuKtEoTO3A5yoM8bvL6XAVX5h9a9IgvRQ1Tqg7A=
+github.com/absfs/fstools v0.9.0/go.mod h1:FN0iANN/osoro9dN+FlZ3KBFd9OeF5XR9g0LFiDbH8s=
 github.com/absfs/inode v0.0.0-20251208170702-9db24ab95ae4 h1:on/poHeOcUsAivcRifj/YVn3KW42mcvGuwIcwY0laTA=
 github.com/absfs/inode v0.0.0-20251208170702-9db24ab95ae4/go.mod h1:98Uz4QOknMBXXWwXUIs2TzSwuz+9mbSAKASbwF1eld8=
 github.com/absfs/memfs v0.0.0-20251208230836-c6633f45580a h1:qlUfgzRrIAX5uuFVZ0IGriYtDCXcmzVF0EezCESG6PM=
