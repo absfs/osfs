@@ -1,6 +1,6 @@
 module github.com/absfs/osfs
 
-go 1.21
+go 1.23
 
 require (
 	github.com/absfs/absfs v1.0.0

@@ -274,3 +274,34 @@ func isReservedName(name string) bool {
 
 	return reservedNames[strings.ToLower(baseName)]
 }
+
+// isNativePath returns true if path appears to be a native Windows path
+// rather than a Unix-style absfs path. This detects unambiguous cases:
+//   - Drive letter paths: C:\foo, C:/foo, c:\foo
+//   - UNC paths: \\server\share
+//
+// This allows osfs to gracefully handle native paths passed by mistake,
+// while the recommended approach is to use FromNative() explicitly.
+func isNativePath(p string) bool {
+	if len(p) < 2 {
+		return false
+	}
+
+	// Check for drive letter: C:\ or C:/
+	if len(p) >= 2 && p[1] == ':' && unicode.IsLetter(rune(p[0])) {
+		// Must have C:\ or C:/ or just C: to be unambiguous
+		if len(p) == 2 {
+			return true // Just "C:"
+		}
+		if p[2] == '\\' || p[2] == '/' {
+			return true // "C:\" or "C:/"
+		}
+	}
+
+	// Check for UNC path: \\server
+	if p[0] == '\\' && p[1] == '\\' {
+		return true
+	}
+
+	return false
+}

@@ -10,7 +10,8 @@ import (
 
 // TestOsFSSuite runs the standard fstesting suite against osfs.
 func TestOsFSSuite(t *testing.T) {
-	// Create a temporary directory for the test
+	// Create a temporary directory for the test.
+	// Note: os.MkdirTemp returns a native path (e.g., "C:\Users\..." on Windows).
 	tmpDir, err := os.MkdirTemp("", "osfs-fstesting-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -22,8 +23,11 @@ func TestOsFSSuite(t *testing.T) {
 		t.Fatalf("failed to create osfs: %v", err)
 	}
 
-	// Change to temp directory so tests don't pollute the working directory
-	if err := fs.Chdir(tmpDir); err != nil {
+	// Change to temp directory so tests don't pollute the working directory.
+	// The recommended approach is to convert native paths to Unix-style using
+	// FromNative(). osfs also handles native paths directly for robustness,
+	// but explicit conversion makes the intent clear and is the preferred pattern.
+	if err := fs.Chdir(FromNative(tmpDir)); err != nil {
 		t.Fatalf("failed to chdir to temp dir: %v", err)
 	}
 

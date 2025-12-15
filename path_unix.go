@@ -111,3 +111,10 @@ func validatePath(path string) error {
 func isReservedName(name string) bool {
 	return false
 }
+
+// isNativePath returns true if path appears to be a native OS path
+// rather than a Unix-style absfs path.
+// On Unix, native paths ARE Unix-style, so this always returns false.
+func isNativePath(path string) bool {
+	return false
+}

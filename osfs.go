@@ -39,10 +39,22 @@ func (fs *FileSystem) isDir(nativePath string) bool {
 
 // toNativePath converts a Unix-style input path to a native OS path,
 // resolving relative paths against the current working directory.
+//
+// For robustness, this function also detects unambiguous native paths
+// (e.g., "C:\foo" on Windows) and handles them correctly. However,
+// the recommended approach is to use FromNative() to convert native
+// paths to Unix-style before passing them to osfs functions.
 func (fs *FileSystem) toNativePath(name string) string {
-	// Handle empty or relative paths
+	// Handle empty path
 	if name == "" {
 		return ToNative(fs.cwd)
+	}
+
+	// Safety check: detect if this is already a native path (e.g., C:\foo on Windows).
+	// This handles the common case where callers pass os.TempDir() or os.MkdirTemp()
+	// results directly without converting via FromNative() first.
+	if isNativePath(name) {
+		return name
 	}
 
 	// Check if path is absolute (starts with / or has drive letter)
