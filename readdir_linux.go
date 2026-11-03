@@ -57,36 +57,11 @@ func readDirOptimized(dirPath string) ([]fs.DirEntry, error) {
 				continue
 			}
 
-			// Convert d_type to fs.FileMode
-			var mode fs.FileMode
-			switch dirent.Type {
-			case syscall.DT_REG:
-				mode = 0
-			case syscall.DT_DIR:
-				mode = fs.ModeDir
-			case syscall.DT_LNK:
-				mode = fs.ModeSymlink
-			case syscall.DT_BLK:
-				mode = fs.ModeDevice
-			case syscall.DT_CHR:
-				mode = fs.ModeDevice | fs.ModeCharDevice
-			case syscall.DT_FIFO:
-				mode = fs.ModeNamedPipe
-			case syscall.DT_SOCK:
-				mode = fs.ModeSocket
-			case syscall.DT_UNKNOWN:
-				// Fallback to lstat for filesystems that don't support d_type
-				fullPath := dirPath + "/" + name
-				info, err := os.Lstat(fullPath)
-				if err != nil {
-					if os.IsNotExist(err) {
-						continue
-					}
-					return nil, err
-				}
-				mode = info.Mode() & fs.ModeType
-			default:
-				// Unknown type, skip
+			mode, ok, err := direntType(dirent.Type, dirPath, name)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
 				continue
 			}
 
@@ -102,6 +77,38 @@ func readDirOptimized(dirPath string) ([]fs.DirEntry, error) {
 	sortDirEntries(entries)
 
 	return entries, nil
+}
+
+// direntType converts a dirent's d_type to fs.DirEntry type bits. On
+// filesystems that report DT_UNKNOWN it asks os.Lstat. ok is false for an
+// entry to leave out: one removed since it was listed, or an unknown d_type.
+func direntType(dtype uint8, dirPath, name string) (mode fs.FileMode, ok bool, err error) {
+	switch dtype {
+	case syscall.DT_REG:
+		return 0, true, nil
+	case syscall.DT_DIR:
+		return fs.ModeDir, true, nil
+	case syscall.DT_LNK:
+		return fs.ModeSymlink, true, nil
+	case syscall.DT_BLK:
+		return fs.ModeDevice, true, nil
+	case syscall.DT_CHR:
+		return fs.ModeDevice | fs.ModeCharDevice, true, nil
+	case syscall.DT_FIFO:
+		return fs.ModeNamedPipe, true, nil
+	case syscall.DT_SOCK:
+		return fs.ModeSocket, true, nil
+	case syscall.DT_UNKNOWN:
+		info, err := os.Lstat(dirPath + "/" + name)
+		if os.IsNotExist(err) {
+			return 0, false, nil
+		}
+		if err != nil {
+			return 0, false, err
+		}
+		return info.Mode() & fs.ModeType, true, nil
+	}
+	return 0, false, nil
 }
 
 // dirEntry implements fs.DirEntry for optimized ReadDir
