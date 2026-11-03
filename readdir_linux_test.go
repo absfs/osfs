@@ -148,8 +148,10 @@ func TestOpenDirCloseOnExec(t *testing.T) {
 }
 
 // TestReadDirNotDirectory checks the errors for names that are not
-// directories, which the getdents reader opens with O_DIRECTORY and os.Open
-// opens without it.
+// directories, which the getdents reader opens with O_DIRECTORY. The os
+// package does so only from Go 1.24, so the op for a name that exists but is
+// not a directory is whichever os.ReadDir gives a regular file: "open" from
+// Go 1.24, "readdirent" before.
 func TestReadDirNotDirectory(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "file")
@@ -160,6 +162,11 @@ func TestReadDirNotDirectory(t *testing.T) {
 	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	var osErr *fs.PathError
+	if _, err := os.ReadDir(file); !errors.As(err, &osErr) {
+		t.Fatalf("os.ReadDir(%q) = %v, want a PathError", file, err)
+	}
+	notDirOp := osErr.Op
 
 	cases := []struct {
 		name string
@@ -167,10 +174,10 @@ func TestReadDirNotDirectory(t *testing.T) {
 		op   string
 		err  syscall.Errno
 	}{
-		{"regular file", file, "readdirent", syscall.ENOTDIR},
+		{"regular file", file, notDirOp, syscall.ENOTDIR},
 		{"child of regular file", filepath.Join(file, "child"), "open", syscall.ENOTDIR},
-		// os.ReadDir would block opening a FIFO with no writer.
-		{"fifo", fifo, "readdirent", syscall.ENOTDIR},
+		// Before Go 1.24 os.ReadDir would block opening a FIFO with no writer.
+		{"fifo", fifo, notDirOp, syscall.ENOTDIR},
 		{"missing", filepath.Join(dir, "nope"), "open", syscall.ENOENT},
 	}
 	for _, tc := range cases {
@@ -194,8 +201,9 @@ func TestReadDirNotDirectory(t *testing.T) {
 	}
 }
 
-// TestReadDirUnreadable checks that a name that is not a directory and
-// cannot be opened fails at open with os's errno.
+// TestReadDirUnreadable checks that a regular file that cannot be opened
+// fails as it does for os.ReadDir: before Go 1.24 at open with EACCES, from
+// Go 1.24 at open with ENOTDIR.
 func TestReadDirUnreadable(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can open any file")
@@ -206,9 +214,8 @@ func TestReadDirUnreadable(t *testing.T) {
 	}
 	got, gotErr := readDirOptimized(file)
 	want, wantErr := os.ReadDir(file)
-	sameListing(t, "ReadDir", got, want, gotErr, wantErr)
-	var pe *fs.PathError
-	if !errors.As(gotErr, &pe) || pe.Op != "open" || pe.Err != syscall.EACCES {
-		t.Errorf("readDirOptimized(%q) = %#v; want PathError{open, EACCES}", file, gotErr)
+	if wantErr == nil {
+		t.Fatalf("os.ReadDir(%q) succeeded", file)
 	}
+	sameListing(t, "ReadDir", got, want, gotErr, wantErr)
 }

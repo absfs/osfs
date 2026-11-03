@@ -8,10 +8,13 @@
   `os.Open` does. A process started by another goroutine while a directory
   was being read inherited the descriptor.
 - `FileSystem.ReadDir` on Linux reports os's error op: `readdirent` for a
-  read failure, where it said `getdents`, and `readdirent` with `ENOTDIR` for
-  a name that exists but is not a directory, where it said `open`. A FIFO
-  fails the same way instead of being opened, so it never blocks. An open or
-  read interrupted by a signal is retried, as os does.
+  read failure, where it said `getdents`. For a name that exists but is not
+  a directory it follows `os.ReadDir` in the Go release it is built with:
+  `open` with `ENOTDIR` from Go 1.24, which opens with `O_DIRECTORY` as
+  osfs does, and `readdirent` with `ENOTDIR` with Go 1.23, where it said
+  `open`. With Go 1.23 a FIFO also fails that way rather than blocking, as
+  `os.ReadDir` would. An open or read interrupted by a signal is retried, as
+  os does.
 - `FileSystem.ReadDir` on Windows returns the errors `os.ReadDir` returns.
   It reported `ERROR_PATH_NOT_FOUND` for a missing name where `os.ReadDir`
   reports `ERROR_FILE_NOT_FOUND`, and `ERROR_DIRECTORY` for a regular file or
