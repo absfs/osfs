@@ -4,6 +4,7 @@ package osfs
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -176,6 +177,361 @@ func TestRootFSHostFollowEscapes(t *testing.T) {
 			wantEscape(t, "Chown", r.Chown(host, os.Getuid(), os.Getgid()))
 			e.secretIntact(t)
 		})
+	}
+}
+
+// TestRootFSDirectoryLinkEscapes checks that the operations that do not
+// follow a final link still follow the directories on the way, and so fail
+// with ErrPathEscapes through a directory link out of the root, leaving
+// everything outside as it was.
+func TestRootFSDirectoryLinkEscapes(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, e *rootEnv)
+		dir   func(e *rootEnv) string // a name for the root's parent
+	}{
+		{"relative directory link out of the root", func(t *testing.T, e *rootEnv) {
+			e.link(t, "..", "up")
+		}, probe("up")},
+		{"absolute directory link to /", func(t *testing.T, e *rootEnv) {
+			e.link(t, "/", "slash")
+		}, func(e *rootEnv) string { return "slash" + e.parent }},
+		{"absolute directory link to the parent", func(t *testing.T, e *rootEnv) {
+			e.link(t, e.parent, "abs")
+		}, probe("abs")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newRootEnv(t)
+			e.write(t, "in", "INSIDE")
+			c.setup(t, e)
+			dir := e.dir + "/" + c.dir(e)
+			secret, fresh := dir+"/secret", dir+"/fresh"
+			if _, err := os.Lstat(secret); err != nil {
+				t.Fatalf("os.Lstat(%q) = %v; the setup no longer escapes", secret, err)
+			}
+
+			r := e.r
+			_, err := r.Lstat(secret)
+			wantEscape(t, "Lstat", err)
+			_, err = r.Readlink(secret)
+			wantEscape(t, "Readlink", err)
+			_, err = r.ReadDir(dir)
+			wantEscape(t, "ReadDir", err)
+			// os.Root in Go 1.25.0 and 1.26.0 follows "link/" out.
+			_, err = r.ReadDir(dir + "/")
+			wantEscape(t, "ReadDir(dir/)", err)
+			_, err = r.Open(dir + "/")
+			wantEscape(t, "Open(dir/)", err)
+			wantEscape(t, "Lchown", r.Lchown(secret, os.Getuid(), os.Getgid()))
+			wantEscape(t, "Remove", r.Remove(secret))
+			wantEscape(t, "RemoveAll", r.RemoveAll(secret))
+			wantEscape(t, "Rename out", r.Rename(e.host("in"), fresh))
+			wantEscape(t, "Rename in", r.Rename(secret, e.host("taken")))
+			wantEscape(t, "Mkdir", r.Mkdir(fresh, 0o755))
+			wantEscape(t, "MkdirAll", r.MkdirAll(fresh+"/x", 0o755))
+			wantEscape(t, "Symlink", r.Symlink("x", fresh))
+			_, err = r.OpenFile(fresh, os.O_WRONLY|os.O_CREATE|syscall.O_NOFOLLOW, 0o644)
+			wantEscape(t, "OpenFile(O_NOFOLLOW)", err)
+			_, err = r.OpenFile(secret, os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0)
+			wantEscape(t, "OpenFile(O_NOFOLLOW|O_TRUNC)", err)
+
+			e.secretIntact(t)
+			entries, err := os.ReadDir(e.parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, de := range entries {
+				names = append(names, de.Name())
+			}
+			if !slices.Equal(names, []string{"root", "secret"}) {
+				t.Errorf("the root's parent now holds %v", names)
+			}
+			if data, err := os.ReadFile(e.host("in")); err != nil || string(data) != "INSIDE" {
+				t.Errorf("in = %q, %v", data, err)
+			}
+		})
+	}
+}
+
+// TestRootFSNoFollowRace swaps a regular file for a symlink to another file
+// inside the root while OpenFile truncates it with O_NOFOLLOW. os.Root
+// follows a final link whatever the flags; RootFS must never open the
+// link's target.
+func TestRootFSNoFollowRace(t *testing.T) {
+	e := newRootEnv(t)
+	e.write(t, "victim", "VICTIM")
+	e.write(t, "xf", "")
+	e.link(t, "victim", "xl")
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for !stop.Load() {
+			os.Rename(e.host("xf"), e.host("x"))
+			os.Rename(e.host("x"), e.host("xf"))
+			os.Rename(e.host("xl"), e.host("x"))
+			os.Rename(e.host("x"), e.host("xl"))
+		}
+	}()
+	defer func() {
+		stop.Store(true)
+		wg.Wait()
+	}()
+
+	opened := 0
+	for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); {
+		f, err := e.r.OpenFile(e.host("x"), os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0)
+		if err == nil {
+			opened++
+			f.Close()
+		}
+	}
+	if data, err := os.ReadFile(e.host("victim")); err != nil || string(data) != "VICTIM" {
+		t.Fatalf("O_NOFOLLOW followed the link: victim = %q, %v", data, err)
+	}
+	t.Logf("opened the regular file %d times", opened)
+}
+
+// TestRootFSNoFollow checks OpenFile with O_NOFOLLOW apart from the race.
+func TestRootFSNoFollow(t *testing.T) {
+	e := newRootEnv(t)
+	r := e.r
+	e.write(t, "sub/f", "INSIDE")
+	e.link(t, e.dir+"/sub", "d")
+	e.link(t, "f", "sub/l")
+	const nofollow = syscall.O_NOFOLLOW
+
+	// Directories on the way are followed, absolute links inside included.
+	f, err := r.OpenFile(e.host("d/f"), os.O_RDONLY|nofollow, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := io.ReadAll(f); string(data) != "INSIDE" {
+		t.Errorf("OpenFile(d/f) read %q", data)
+	}
+	if f.Name() != e.dir+"/sub/f" {
+		t.Errorf("Name() = %q", f.Name())
+	}
+	f.Close()
+
+	// A final link is refused, not followed and not an escape.
+	_, err = r.OpenFile(e.host("d/l"), os.O_RDONLY|nofollow, 0)
+	if err == nil || errors.Is(err, ErrPathEscapes) {
+		t.Errorf("OpenFile(d/l) = %v, want a refusal that is not an escape", err)
+	}
+	_, hostErr := os.OpenFile(e.host("sub/l"), os.O_RDONLY|nofollow, 0)
+	if !errors.Is(err, errors.Unwrap(hostErr)) {
+		t.Errorf("OpenFile(d/l) = %v; os.OpenFile gives %v", err, hostErr)
+	}
+	var pe *os.PathError
+	if !errors.As(err, &pe) || pe.Op != "open" || pe.Path != e.host("d/l") {
+		t.Errorf("OpenFile(d/l) error = %#v", err)
+	}
+
+	// Creation in a linked directory; O_APPEND still refuses WriteAt.
+	f, err = r.OpenFile(e.host("d/new"), os.O_WRONLY|os.O_CREATE|os.O_APPEND|nofollow, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte("x"), 0); err == nil {
+		t.Error("WriteAt succeeded on a file opened with O_APPEND")
+	}
+	if _, err := f.WriteString("NEW"); err != nil {
+		t.Error(err)
+	}
+	f.Close()
+	if info, err := os.Stat(e.host("sub/new")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("sub/new = %v, %v", info, err)
+	}
+
+	// A name in the root itself, and the root.
+	e.write(t, "top", "TOP")
+	if f, err := r.OpenFile("top", os.O_RDONLY|nofollow, 0); err != nil {
+		t.Error(err)
+	} else {
+		f.Close()
+	}
+	if f, err := r.OpenFile(e.dir, os.O_RDONLY|nofollow, 0); err != nil {
+		t.Error(err)
+	} else {
+		f.Close()
+	}
+
+	// Failures name the caller's name.
+	for _, c := range []struct {
+		name string
+		flag int
+		perm os.FileMode
+		want error
+	}{
+		{"missing/f", os.O_RDONLY, 0, fs.ErrNotExist},
+		{"sub/f/x", os.O_RDONLY, 0, syscall.ENOTDIR},
+		{"sub/missing", os.O_RDONLY, 0, fs.ErrNotExist},
+		{"../secret", os.O_RDONLY, 0, ErrPathEscapes},
+	} {
+		_, err := r.OpenFile(c.name, c.flag|nofollow, c.perm)
+		if !errors.Is(err, c.want) || !errors.As(err, &pe) || pe.Path != c.name || pe.Op != "open" {
+			t.Errorf("OpenFile(%q) = %v, want %v", c.name, err, c.want)
+		}
+	}
+	if _, err := r.OpenFile("sub/odd", os.O_WRONLY|os.O_CREATE|nofollow, 0o4755); err == nil {
+		t.Error("OpenFile with a setuid mode succeeded; os.Root refuses it")
+	}
+
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.OpenFile(e.host("sub/f"), os.O_RDONLY|nofollow, 0); err == nil {
+		t.Error("OpenFile after Close succeeded")
+	}
+	if _, err := r.OpenFile(e.dir, os.O_RDONLY|nofollow, 0); err == nil {
+		t.Error("OpenFile(root) after Close succeeded")
+	}
+}
+
+// TestRootFSLongLinkChains checks that a chain of links inside the root is
+// followed as far as the host follows it, though os.Root stops at 8.
+func TestRootFSLongLinkChains(t *testing.T) {
+	e := newRootEnv(t)
+	r := e.r
+	e.write(t, "f", "INSIDE")
+	e.write(t, "d/g", "G")
+	const n = 12
+	e.link(t, "f", "l0")
+	e.link(t, "d", "dl0")
+	for i := 1; i < n; i++ {
+		e.link(t, fmt.Sprintf("l%d", i-1), fmt.Sprintf("l%d", i))
+		e.link(t, fmt.Sprintf("dl%d", i-1), fmt.Sprintf("dl%d", i))
+	}
+	last, dlast := fmt.Sprintf("l%d", n-1), fmt.Sprintf("dl%d", n-1)
+	if data, err := os.ReadFile(e.host(last)); err != nil || string(data) != "INSIDE" {
+		t.Fatalf("os.ReadFile(%s) = %q, %v", last, data, err)
+	}
+	if data, err := r.ReadFile(e.host(last)); err != nil || string(data) != "INSIDE" {
+		t.Errorf("ReadFile(%s) = %q, %v", last, data, err)
+	}
+	if info, err := r.Stat(e.host(last)); err != nil || !info.Mode().IsRegular() {
+		t.Errorf("Stat(%s) = %v, %v", last, info, err)
+	}
+	if data, err := r.ReadFile(e.host(dlast + "/g")); err != nil || string(data) != "G" {
+		t.Errorf("ReadFile(%s/g) = %q, %v", dlast, data, err)
+	}
+	if info, err := r.Lstat(e.host(dlast + "/g")); err != nil || !info.Mode().IsRegular() {
+		t.Errorf("Lstat(%s/g) = %v, %v", dlast, info, err)
+	}
+	if err := r.Rename(e.host(dlast+"/g"), e.host(dlast+"/h")); err != nil {
+		t.Errorf("Rename through %s = %v", dlast, err)
+	}
+	if f, err := r.OpenFile(e.host(dlast+"/h"), os.O_RDONLY|syscall.O_NOFOLLOW, 0); err != nil {
+		t.Errorf("OpenFile(%s/h, O_NOFOLLOW) = %v", dlast, err)
+	} else {
+		f.Close()
+	}
+
+	// Past maxRootLinks, the chain is a loop.
+	e.link(t, "f", "m0")
+	for i := 1; i <= maxRootLinks; i++ {
+		e.link(t, fmt.Sprintf("m%d", i-1), fmt.Sprintf("m%d", i))
+	}
+	_, err := r.Stat(e.host(fmt.Sprintf("m%d", maxRootLinks)))
+	if !errors.Is(err, syscall.ELOOP) {
+		t.Errorf("Stat past %d links = %v, want ELOOP", maxRootLinks, err)
+	}
+}
+
+// TestRootFSErrorOps checks that RootFS's errors carry the operation osfs's
+// do, not os.Root's internal one.
+func TestRootFSErrorOps(t *testing.T) {
+	e := newRootEnv(t)
+	e.write(t, "f", "F")
+	if err := os.Mkdir(e.host("d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o, err := NewFS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := e.host("missing")
+	when := time.Unix(1, 0)
+	type op struct {
+		name     string
+		osfs, rt error
+	}
+	pair := func(name string, a, b error) op { return op{name, a, b} }
+	first := func(_ any, err error) error { return err }
+	ops := []op{
+		pair("Open", first(o.Open(missing)), first(e.r.Open(missing))),
+		pair("OpenFile", first(o.OpenFile(missing, os.O_RDONLY, 0)), first(e.r.OpenFile(missing, os.O_RDONLY, 0))),
+		pair("Create", first(o.Create(e.host("d/missing/x"))), first(e.r.Create(e.host("d/missing/x")))),
+		pair("Stat", first(o.Stat(missing)), first(e.r.Stat(missing))),
+		pair("Lstat", first(o.Lstat(missing)), first(e.r.Lstat(missing))),
+		pair("ReadFile", first(o.ReadFile(missing)), first(e.r.ReadFile(missing))),
+		pair("ReadFile(dir)", first(o.ReadFile(e.host("d"))), first(e.r.ReadFile(e.host("d")))),
+		pair("ReadDir", first(o.ReadDir(missing)), first(e.r.ReadDir(missing))),
+		pair("Readlink", first(o.Readlink(e.host("f"))), first(e.r.Readlink(e.host("f")))),
+		pair("Truncate", o.Truncate(missing, 0), e.r.Truncate(missing, 0)),
+		pair("Mkdir", o.Mkdir(e.host("d"), 0o755), e.r.Mkdir(e.host("d"), 0o755)),
+		pair("MkdirAll", o.MkdirAll(e.host("f/x"), 0o755), e.r.MkdirAll(e.host("f/x"), 0o755)),
+		pair("Remove", o.Remove(missing), e.r.Remove(missing)),
+		pair("Chmod", o.Chmod(missing, 0o644), e.r.Chmod(missing, 0o644)),
+		pair("Chtimes", o.Chtimes(missing, when, when), e.r.Chtimes(missing, when, when)),
+		pair("Chown", o.Chown(missing, os.Getuid(), os.Getgid()), e.r.Chown(missing, os.Getuid(), os.Getgid())),
+		pair("Lchown", o.Lchown(missing, os.Getuid(), os.Getgid()), e.r.Lchown(missing, os.Getuid(), os.Getgid())),
+	}
+	for _, c := range ops {
+		var a, b *os.PathError
+		if !errors.As(c.osfs, &a) || !errors.As(c.rt, &b) {
+			t.Errorf("%s: osfs %v, RootFS %v; want two *os.PathError", c.name, c.osfs, c.rt)
+			continue
+		}
+		if a.Op != b.Op || !errors.Is(b.Err, a.Err) {
+			t.Errorf("%s: osfs %q %v, RootFS %q %v", c.name, a.Op, a.Err, b.Op, b.Err)
+		}
+	}
+}
+
+// TestRootFSTruncateFIFO checks that Truncate on a FIFO inside the root
+// fails at once rather than waiting for a reader.
+func TestRootFSTruncateFIFO(t *testing.T) {
+	e := newRootEnv(t)
+	fifo := e.host("fifo")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Skipf("mkfifo: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- e.r.Truncate(fifo, 0) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("Truncate(fifo) succeeded")
+		}
+	case <-time.After(5 * time.Second):
+		// Release the blocked open with a reader before failing.
+		if f, err := os.OpenFile(fifo, os.O_RDONLY|syscall.O_NONBLOCK, 0); err == nil {
+			defer f.Close()
+		}
+		<-done
+		t.Fatal("Truncate(fifo) blocked waiting for a reader")
+	}
+}
+
+// TestRootFSLexicalNames checks the documented difference from the host: a
+// name is cleaned lexically before any link in it is followed, so ".." after
+// a directory link undoes the link's name, not its target.
+func TestRootFSLexicalNames(t *testing.T) {
+	e := newRootEnv(t)
+	e.write(t, "a/b/x", "AB")
+	e.write(t, "a/x", "A")
+	e.write(t, "x", "TOP")
+	e.link(t, "a/b", "dl")
+	if data, err := os.ReadFile(e.host("dl") + "/../x"); err != nil || string(data) != "A" {
+		t.Fatalf("os.ReadFile(dl/../x) = %q, %v; the host no longer applies .. physically", data, err)
+	}
+	if data, err := e.r.ReadFile(e.host("dl") + "/../x"); err != nil || string(data) != "TOP" {
+		t.Errorf("ReadFile(dl/../x) = %q, %v; want the lexical TOP", data, err)
 	}
 }
 
@@ -536,7 +892,11 @@ func TestOpenRootOsFS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sfs.(*RootFS).Close()
+	c, ok := sfs.(io.Closer)
+	if !ok {
+		t.Fatal("OpenRoot's result is not an io.Closer")
+	}
+	defer c.Close()
 	if data, err := sfs.ReadFile(e.host("f")); err != nil || string(data) != "INSIDE" {
 		t.Errorf("ReadFile(f) = %q, %v", data, err)
 	}

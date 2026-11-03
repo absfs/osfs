@@ -14,10 +14,18 @@
   target lies inside the root is still followed, inside the root.
   `RootFS` needs Go 1.25 on Unix; elsewhere `OpenRoot` returns an error
   wrapping `errors.ErrUnsupported`, and osfs still builds with Go 1.23.
+- `RootFS.OpenFile` with `O_NOFOLLOW` opens the final element with
+  `openat(2)` and `O_NOFOLLOW` itself, since `os.Root` follows a final link
+  whatever the flags. A link swapped in while it runs is refused, as
+  `os.OpenFile` refuses it, not followed to another file in the root.
 
 ### Added
 
 - `RootFS`, `NewRootFS`, `FileSystem.OpenRoot` and `ErrPathEscapes`.
+  `RootFS` and `NewRootFS` are defined only in `go1.25 && unix` builds;
+  `OpenRoot` and `ErrPathEscapes` everywhere. `OpenRoot`'s result is an
+  `io.Closer`.
+- A dependency on `golang.org/x/sys`, for `openat(2)`.
 
 ### Fixed
 

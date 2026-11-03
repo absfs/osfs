@@ -121,36 +121,55 @@ of the root directory:
 
 ```go
 o, _ := osfs.NewFS()
-sfs, err := o.OpenRoot("/srv/workspaces/a") // or osfs.NewRootFS(dir)
+sfs, err := o.OpenRoot("/srv/workspaces/a")
 if err != nil {
 	log.Fatal(err) // errors.ErrUnsupported before Go 1.25 or off Unix
 }
-defer sfs.(*osfs.RootFS).Close()
+if c, ok := sfs.(io.Closer); ok { // the root stays open until closed
+	defer c.Close()
+}
 
 data, err := sfs.ReadFile("/srv/workspaces/a/link") // errors.Is(err, osfs.ErrPathEscapes) if link leads out
 ```
 
 - Names are those osfs takes: absolute host paths, or names relative to the
   RootFS's working directory (which starts at the root). A name outside the
-  root fails with an `*os.PathError` wrapping `osfs.ErrPathEscapes`.
+  root fails with an error wrapping `osfs.ErrPathEscapes`: an
+  `*os.PathError`, or an `*os.LinkError` from `Rename` and `Symlink`.
+- Names are cleaned lexically first, as osfs cleans relative names: `..` in
+  a name undoes the element before it even when that element is a link, so
+  `root/dl/../x` is `root/x` wherever `dl` points. The host would apply
+  `..` to the link's target. `..` inside a link's target is applied where
+  the link led, as on the host.
 - A relative link, `..` included, is followed only while it stays inside the
   root; one that leads out fails with `ErrPathEscapes`.
 - `os.Root` refuses every absolute link. RootFS follows an absolute link
   whose target, as written, is the root's path (as given, or with symlinks
   evaluated) or lies below it, inside the root. Any other absolute target
   fails with `ErrPathEscapes`.
+- A chain of up to 40 links is followed (`os.Root` alone stops at 8);
+  beyond that, or in a loop, the operation fails with `ELOOP`.
 - `Symlink` stores targets verbatim and `Readlink` returns them verbatim.
 - `TempDir` is the OS's, as for osfs, and usually outside the root.
-- With `O_NOFOLLOW`, `OpenFile` fails with `ELOOP` on a final link.
+- With `O_NOFOLLOW`, `OpenFile` refuses a final link as `os.OpenFile` does
+  (`ELOOP` on Linux and macOS), atomically: the kernel opens the final
+  element, so a link swapped in meanwhile is not followed. (`os.Root`
+  itself follows a final link whatever the flags.)
+- Errors carry osfs's operation names (`open`, `stat`, `truncate`, ...),
+  not `os.Root`'s (`openat`, `statat`, ...), and the caller's name.
 
-[basefs](https://github.com/absfs/basefs) uses `OpenRoot` automatically when
-its underlying filesystem is osfs.
+[basefs](https://github.com/absfs/basefs) over osfs can use `OpenRoot` to
+confine itself to its root directory; see
+[absfs/basefs#7](https://github.com/absfs/basefs/pull/7).
 
-**Requirements.** `RootFS` and `NewRootFS` need Go 1.25 (the release that
-gave `os.Root` `Rename`, `Symlink`, `Readlink`, `Chmod` and the rest) on a
-Unix system. osfs itself still builds with Go 1.23, and on any platform;
-there, and on Windows, `FileSystem.OpenRoot` returns an error wrapping
-`errors.ErrUnsupported`. `os.Root`'s own limits apply: it does not stop
+**Requirements.** `RootFS` needs Go 1.25 (the release that gave `os.Root`
+`Rename`, `Symlink`, `Readlink`, `Chmod` and the rest) on a Unix system.
+osfs itself still builds with Go 1.23, and on any platform; there, and on
+Windows, `FileSystem.OpenRoot` returns an error wrapping
+`errors.ErrUnsupported`. The `RootFS` type and `NewRootFS` are defined only
+in `go1.25 && unix` builds, so code that names them needs the same build
+constraint; portable code uses `OpenRoot` and closes the result through
+`io.Closer`, as above. `os.Root`'s own limits apply: it does not stop
 traversal of mount points or access to device files.
 
 ## API Overview

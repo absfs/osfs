@@ -14,16 +14,24 @@ import (
 	"time"
 
 	"github.com/absfs/absfs"
+	"golang.org/x/sys/unix"
 )
 
-// maxRootLinks bounds the symlinks one name may lead through, as the
-// kernel's own limit does.
+// maxRootLinks bounds the symlinks one name may lead through. os.Root stops
+// at 8; RootFS follows a longer chain itself, up to 40 links, as Linux does.
 const maxRootLinks = 40
 
 // RootFS is an absfs.SymlinkFileSystem confined to one host directory, its
-// root, by os.Root. It takes the same names osfs does, absolute host paths
-// or names relative to its working directory, and refuses a name outside the
-// root with an *os.PathError wrapping ErrPathEscapes.
+// root, by os.Root. It takes the names osfs does, absolute host paths or
+// names relative to its working directory, and refuses a name outside the
+// root with an error wrapping ErrPathEscapes: an *os.PathError, or an
+// *os.LinkError from Rename and Symlink.
+//
+// A name is cleaned lexically before it is judged against the root, as osfs
+// already cleans a relative name, so ".." in the name undoes the element
+// before it even if that element is a symlink: root/dl/../x is root/x. The
+// host applies ".." to where the link led. ".." in a link's target is
+// applied to where the links before it led, as on the host.
 //
 // Unlike osfs, which hands each name to the OS, RootFS resolves every name
 // through an os.Root, so the host never follows a symlink out of the root,
@@ -32,11 +40,14 @@ const maxRootLinks = 40
 // ErrPathEscapes. An absolute link is followed when its target, as written,
 // is the root's path (as given or with symlinks evaluated) or lies below it:
 // the target is then taken inside the root. Any other absolute target fails
-// with ErrPathEscapes. Symlink stores targets verbatim and Readlink returns
-// them verbatim; neither is checked, since neither follows the link.
+// with ErrPathEscapes. A chain of up to 40 links is followed. Symlink stores
+// targets verbatim and Readlink returns them verbatim; neither is checked,
+// since neither follows the link.
 //
-// RootFS requires Go 1.25 on a Unix system. Use FileSystem.OpenRoot for a
-// portable entry point that reports errors.ErrUnsupported elsewhere.
+// RootFS and NewRootFS are defined only in builds for Go 1.25 or later on a
+// Unix system; code that names them needs the same build constraint
+// (go1.25 && unix). FileSystem.OpenRoot is the portable entry point: it
+// reports errors.ErrUnsupported elsewhere, and its result is an io.Closer.
 //
 // A RootFS holds the root directory open; Close releases it. If the root is
 // moved on the host, RootFS keeps operating on it in its new place, as
@@ -149,10 +160,12 @@ func (r *RootFS) escaped(err error) bool {
 // resolve replaces each symlink among the directory elements of rel, and its
 // final element if follow is set, by what it points to, so that the result
 // leads through no symlink. An absolute target that names a place inside the
-// root is taken there. ".." is applied to what has been resolved so far, so
-// it is physical, as the host would apply it. A target that leaves the root
-// gives ErrPathEscapes. Once an element is missing, or cannot be examined,
-// the rest is kept as it is for the operation itself to judge.
+// root is taken there. rel is clean, so any ".." comes from a link's target;
+// it is applied to what has been resolved so far, so it is physical, as the
+// host would apply it. A target that leaves the root gives ErrPathEscapes,
+// and more than maxRootLinks links give ELOOP. Once an element is missing,
+// or cannot be examined, the rest is kept as it is for the operation itself
+// to judge.
 //
 // Every lookup goes through os.Root, and so does the operation given the
 // result. A link swapped in meanwhile can make the operation fail, never
@@ -181,7 +194,14 @@ func (r *RootFS) resolve(rel string, follow bool) (string, error) {
 		p := strings.Join(append(slices.Clip(done), elem), "/")
 		info, err := r.root.Lstat(p)
 		if err != nil {
-			done = append(append(done, elem), todo...)
+			// Keep the rest, without empty elements, so that the result
+			// never ends in a slash (see openNoFollow).
+			done = append(done, elem)
+			for _, e := range todo {
+				if e != "" {
+					done = append(done, e)
+				}
+			}
 			break
 		}
 		if info.Mode()&fs.ModeSymlink == 0 {
@@ -211,9 +231,19 @@ func (r *RootFS) resolve(rel string, follow bool) (string, error) {
 	return strings.Join(done, "/"), nil
 }
 
-// fix makes err, from os.Root, name the caller's name rather than the name
-// relative to the root, and turns os.Root's escape error into
-// ErrPathEscapes.
+// rootOps are the operation names os.Root's errors carry. fix replaces them
+// by the caller's operation, so that RootFS's errors read as osfs's do.
+var rootOps = map[string]bool{
+	"open": true, "openat": true, "statat": true, "mkdirat": true,
+	"removeat": true, "RemoveAll": true, "renameat": true, "linkat": true,
+	"symlinkat": true, "readlinkat": true, "chmodat": true, "chownat": true,
+	"lchownat": true, "chtimesat": true,
+}
+
+// fix makes err, from os.Root, name the caller's name and operation rather
+// than the name relative to the root and os.Root's own operation, and turns
+// os.Root's escape error into ErrPathEscapes. An error from an operation on
+// an open file, such as "read", keeps its operation.
 func (r *RootFS) fix(op, name string, err error) error {
 	if err == nil {
 		return nil
@@ -223,31 +253,48 @@ func (r *RootFS) fix(op, name string, err error) error {
 	}
 	var pe *os.PathError
 	if errors.As(err, &pe) {
-		return &os.PathError{Op: pe.Op, Path: name, Err: pe.Err}
+		if !rootOps[pe.Op] {
+			op = pe.Op
+		}
+		return &os.PathError{Op: op, Path: name, Err: pe.Err}
 	}
 	var le *os.LinkError
 	if errors.As(err, &le) {
-		return &os.PathError{Op: le.Op, Path: name, Err: le.Err}
+		return &os.PathError{Op: op, Path: name, Err: le.Err}
 	}
 	return &os.PathError{Op: op, Path: name, Err: err}
 }
 
-// do runs f on name made relative to the root. If os.Root refuses the name
-// as leaving the root, which it also does for any absolute symlink on the
-// way, do resolves the symlinks itself and runs f once more on the result.
-// follow says whether f follows a final symlink.
+// retry reports whether err from os.Root calls for resolving the name here
+// and trying once more. os.Root refuses a name that leaves the root, which it
+// also does for any absolute symlink on the way, and gives up with ELOOP
+// after 8 symlinks, where the host allows a longer chain. resolve follows
+// absolute links that stay inside and allows maxRootLinks links, and its
+// result leads through none.
+func (r *RootFS) retry(err error) bool {
+	return r.escaped(err) || errors.Is(err, syscall.ELOOP)
+}
+
+// do runs f on name made relative to the root. If os.Root refuses the name,
+// do resolves the symlinks itself and runs f once more on the result; see
+// retry. follow says whether f follows a final symlink.
 func (r *RootFS) do(op, name string, follow bool, f func(rel string) error) error {
 	rel, err := r.rel(op, name)
 	if err != nil {
 		return err
 	}
-	err = f(rel)
-	if r.escaped(err) {
+	return r.fix(op, name, r.run(rel, follow, f))
+}
+
+// run is do for a name already made relative to the root.
+func (r *RootFS) run(rel string, follow bool, f func(rel string) error) error {
+	err := f(rel)
+	if r.retry(err) {
 		if rel, err = r.resolve(rel, follow); err == nil {
 			err = f(rel)
 		}
 	}
-	return r.fix(op, name, err)
+	return err
 }
 
 // do2 is do for Rename's two names, neither followed at the end.
@@ -261,7 +308,7 @@ func (r *RootFS) do2(op, oldname, newname string, f func(oldrel, newrel string) 
 		return &os.LinkError{Op: op, Old: oldname, New: newname, Err: ErrPathEscapes}
 	}
 	err = f(oldrel, newrel)
-	if r.escaped(err) {
+	if r.retry(err) {
 		oldrel, err = r.resolve(oldrel, false)
 		if err == nil {
 			newrel, err = r.resolve(newrel, false)
@@ -338,21 +385,73 @@ func (r *RootFS) Create(name string) (absfs.File, error) {
 }
 
 // OpenFile opens the named file with the given flags and mode. With
-// O_NOFOLLOW, a final symlink fails with ELOOP, as it does for os.OpenFile.
+// O_NOFOLLOW, the kernel opens the final element itself, relative to its
+// directory, so a final symlink fails (with ELOOP on most systems) as it does
+// for os.OpenFile, even if it is swapped in while OpenFile runs.
 func (r *RootFS) OpenFile(name string, flag int, perm os.FileMode) (absfs.File, error) {
-	var f *os.File
-	follow := flag&syscall.O_NOFOLLOW == 0
-	if !follow {
-		// os.Root follows a final symlink despite O_NOFOLLOW.
-		if info, err := r.Lstat(name); err == nil && info.Mode()&fs.ModeSymlink != 0 {
-			return nil, &os.PathError{Op: "open", Path: name, Err: syscall.ELOOP}
-		}
+	if flag&syscall.O_NOFOLLOW != 0 {
+		return r.openNoFollow(name, flag, perm)
 	}
-	err := r.do("open", name, follow, func(rel string) (err error) {
+	var f *os.File
+	err := r.do("open", name, true, func(rel string) (err error) {
 		f, err = r.root.OpenFile(rel, flag, perm)
 		return err
 	})
 	return r.file(f, err)
+}
+
+// openNoFollow is OpenFile with O_NOFOLLOW. os.Root ignores O_NOFOLLOW: on
+// ELOOP it reads the final link and follows it. So openNoFollow opens the
+// final element's directory through the root, following links as any
+// directory on the way is followed, and then the final element with openat
+// and O_NOFOLLOW, which the kernel applies atomically. The final element is
+// one name in that directory, so it cannot leave the root.
+func (r *RootFS) openNoFollow(name string, flag int, perm os.FileMode) (absfs.File, error) {
+	rel, err := r.rel("open", name)
+	if err != nil {
+		return nil, err
+	}
+	if perm&0o777 != perm {
+		return nil, &os.PathError{Op: "open", Path: name, Err: errors.New("unsupported file mode")}
+	}
+	if rel == "." {
+		// The root itself is held open; there is no link to follow.
+		f, err := r.root.OpenFile(rel, flag, perm)
+		return r.file(f, r.fix("open", name, err))
+	}
+	// path.Dir, unlike path.Split, leaves no trailing slash: os.Root in Go
+	// 1.25.0 and 1.26.0 follows a symlink out of the root for "link/".
+	dir, base := path.Dir(rel), path.Base(rel)
+	var parent *os.File
+	err = r.run(dir, true, func(rel string) (err error) {
+		parent, err = r.root.Open(rel)
+		return err
+	})
+	if err != nil {
+		return nil, r.fix("open", name, err)
+	}
+	defer parent.Close()
+	conn, err := parent.SyscallConn()
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: name, Err: err}
+	}
+	fd := -1
+	cerr := conn.Control(func(pfd uintptr) {
+		for {
+			fd, err = unix.Openat(int(pfd), base, flag|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, uint32(perm))
+			if err != syscall.EINTR {
+				return
+			}
+		}
+	})
+	if err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: name, Err: err}
+	}
+	f := os.NewFile(uintptr(fd), path.Join(parent.Name(), base))
+	return &File{f: f, append: flag&os.O_APPEND != 0}, nil
 }
 
 // Truncate changes the size of the named file.

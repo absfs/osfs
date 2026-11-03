@@ -108,7 +108,7 @@ func (fs *FileSystem) Open(name string) (absfs.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &File{fs, f}, nil
+	return &File{filer: fs, f: f}, nil
 }
 
 // Create creates or truncates the named file.
@@ -118,7 +118,7 @@ func (fs *FileSystem) Create(name string) (absfs.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &File{fs, f}, nil
+	return &File{filer: fs, f: f}, nil
 }
 
 // Truncate changes the size of the named file.
@@ -143,7 +143,7 @@ func (fs *FileSystem) OpenFile(name string, flag int, perm os.FileMode) (absfs.F
 	if err != nil {
 		return nil, err
 	}
-	return &File{fs, f}, err
+	return &File{filer: fs, f: f}, err
 }
 
 // Remove removes the named file or empty directory.
@@ -246,9 +246,16 @@ func (fs *FileSystem) ReadFile(name string) ([]byte, error) {
 // *RootFS, which takes the same names as osfs but never lets the host follow
 // a symlink out of dir. dir is resolved like any other osfs name.
 //
-// RootFS requires Go 1.25 or later on a Unix system. Elsewhere OpenRoot
-// returns an *os.PathError wrapping errors.ErrUnsupported, so a caller can
-// fall back to the unconfined FileSystem knowingly, as basefs does.
+// The result holds dir open and implements io.Closer; close it when done:
+//
+//	if c, ok := sfs.(io.Closer); ok {
+//		defer c.Close()
+//	}
+//
+// RootFS requires Go 1.25 or later on a Unix system, and the RootFS type
+// exists only in such builds. Elsewhere OpenRoot returns an *os.PathError
+// wrapping errors.ErrUnsupported, so a caller can fall back to the
+// unconfined FileSystem knowingly.
 func (fs *FileSystem) OpenRoot(dir string) (absfs.SymlinkFileSystem, error) {
 	return openRoot(fs.toNativePath(dir))
 }

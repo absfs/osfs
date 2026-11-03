@@ -1,6 +1,7 @@
 package osfs
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 )
@@ -8,7 +9,14 @@ import (
 type File struct {
 	filer *FileSystem
 	f     *os.File
+	// append is set for a file opened with O_APPEND whose *os.File comes
+	// from os.NewFile, which does not know of the flag.
+	append bool
 }
+
+// errWriteAtInAppendMode is os's error for WriteAt on a file opened with
+// O_APPEND.
+var errWriteAtInAppendMode = errors.New("os: invalid use of WriteAt on file opened with O_APPEND")
 
 // Name returns the file name in Unix-style format.
 // On Windows, this includes the drive letter (e.g., "/c/Users/foo/file.txt").
@@ -29,6 +37,9 @@ func (f *File) Write(p []byte) (int, error) {
 }
 
 func (f *File) WriteAt(b []byte, off int64) (n int, err error) {
+	if f.append {
+		return 0, errWriteAtInAppendMode
+	}
 	return f.f.WriteAt(b, off)
 }
 
