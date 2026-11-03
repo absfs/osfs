@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -218,4 +219,124 @@ func TestReadDirUnreadable(t *testing.T) {
 		t.Fatalf("os.ReadDir(%q) succeeded", file)
 	}
 	sameListing(t, "ReadDir", got, want, gotErr, wantErr)
+}
+
+// TestReadDirLeavesFIFOUnopened checks that ReadDir on a FIFO never opens
+// it. Opening the read end would release a writer blocked in open, and
+// closing it again would leave that writer's next write failing EPIPE.
+func TestReadDirLeavesFIFOUnopened(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "fifo")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opened := make(chan error, 1)
+	go func() {
+		w, err := os.OpenFile(fifo, os.O_WRONLY, 0)
+		if err == nil {
+			w.Close()
+		}
+		opened <- err
+	}()
+	// Let the writer block in open. If it has not got there yet the test
+	// can only pass, never fail wrongly.
+	time.Sleep(100 * time.Millisecond)
+
+	if _, err := readDirOptimized(fifo); err == nil {
+		t.Errorf("readDirOptimized(%q) succeeded", fifo)
+	}
+	select {
+	case err := <-opened:
+		t.Errorf("readDirOptimized(%q) opened the FIFO: a blocked writer's open returned %v", fifo, err)
+		return
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Release the writer.
+	r, err := os.OpenFile(fifo, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if err := <-opened; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestReadDirReadError checks that a failed getdents is reported as os
+// reports it, op "readdirent", and that an interrupted one is retried.
+func TestReadDirReadError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "file"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer func(orig func(int, []byte) (int, error)) { getdents = orig }(getdents)
+
+	getdents = func(int, []byte) (int, error) { return -1, syscall.EIO }
+	entries, err := readDirOptimized(dir)
+	var pe *fs.PathError
+	if entries != nil || !errors.As(err, &pe) || pe.Op != "readdirent" || pe.Path != dir || pe.Err != syscall.EIO {
+		t.Errorf("readDirOptimized with getdents failing = %v, %#v; want nil, PathError{readdirent, %q, EIO}", entries, err, dir)
+	}
+
+	interrupted := false
+	getdents = func(fd int, buf []byte) (int, error) {
+		if !interrupted {
+			interrupted = true
+			return -1, syscall.EINTR
+		}
+		return syscall.Getdents(fd, buf)
+	}
+	entries, err = readDirOptimized(dir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "file" || !interrupted {
+		t.Errorf("readDirOptimized with getdents interrupted = %v, %v; want [file], nil", entries, err)
+	}
+}
+
+// TestReadDirNonDirectoriesMatchOS checks that names that are not
+// directories fail with os.ReadDir's op and errno, whichever Go release the
+// package is built with. (A FIFO is left out: os.ReadDir would block on it
+// before Go 1.24.)
+func TestReadDirNonDirectoriesMatchOS(t *testing.T) {
+	// A short directory keeps the socket path within sun_path's limit.
+	dir, err := os.MkdirTemp("", "osfs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("file", filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("unix", filepath.Join(dir, "sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	paths := []string{
+		file,
+		file + "/",
+		file + "/.",
+		filepath.Join(file, "child"),
+		filepath.Join(dir, "link"),
+		filepath.Join(dir, "link") + "/",
+		filepath.Join(dir, "sock"),
+		"/dev/null",
+		"/proc/self/status",
+	}
+	for _, p := range paths {
+		_, gotErr := readDirOptimized(p)
+		_, wantErr := os.ReadDir(p)
+		var got, want *fs.PathError
+		if !errors.As(gotErr, &got) || !errors.As(wantErr, &want) {
+			t.Errorf("%s: readDirOptimized = %v, os.ReadDir = %v; want PathErrors", p, gotErr, wantErr)
+			continue
+		}
+		if got.Op != want.Op || got.Path != want.Path || got.Err != want.Err {
+			t.Errorf("%s: readDirOptimized = %v, os.ReadDir = %v", p, gotErr, wantErr)
+		}
+	}
 }

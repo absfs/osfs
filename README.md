@@ -149,7 +149,10 @@ entries, err := fs.ReadDir("/path/to/dir")
 `ReadDir` uses a faster native reader on Linux (`getdents` with a larger
 buffer) and Windows (`FindFirstFile`), but its entries and errors are the ones
 `os.ReadDir` gives, op and errno included, so `errors.Is(err, fs.ErrNotExist)`
-answers the same way.
+answers the same way. The one exception is built with Go 1.23 on Linux, where
+`ReadDir` never opens a name that is not a directory: a FIFO or a device
+whose open would fail gives `readdirent` with `ENOTDIR`, where `os.ReadDir`
+would block on the FIFO or report the device's open error.
 On Windows that includes the errno: a missing name is `ERROR_FILE_NOT_FOUND`
 and a regular file `ERROR_PATH_NOT_FOUND`, never `ERROR_DIRECTORY`, and a
 symlink to a directory is listed as a symlink. `File.ReadDir`, `Readdir` and
@@ -221,7 +224,7 @@ See [github.com/absfs/fstools](https://github.com/absfs/fstools) for complete do
 ## Related Packages
 
 - [absfs](https://github.com/absfs/absfs) - Core filesystem abstraction
-- [fstools](https://github.com/absfs/fstools) - Advanced filesystem operations (Walk, Copy, Diff, Patch)
+- [fstools](https://github.com/absfs/fstools) - Advanced filesystem operations (Walk, Copy, ParallelCopy, Equal)
 - [memfs](https://github.com/absfs/memfs) - In-memory filesystem
 - [basefs](https://github.com/absfs/basefs) - Chroot filesystem wrapper
 - [rofs](https://github.com/absfs/rofs) - Read-only filesystem wrapper

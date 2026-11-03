@@ -12,9 +12,15 @@
   a directory it follows `os.ReadDir` in the Go release it is built with:
   `open` with `ENOTDIR` from Go 1.24, which opens with `O_DIRECTORY` as
   osfs does, and `readdirent` with `ENOTDIR` with Go 1.23, where it said
-  `open`. With Go 1.23 a FIFO also fails that way rather than blocking, as
-  `os.ReadDir` would. An open or read interrupted by a signal is retried, as
-  os does.
+  `open`. With Go 1.23 a name that is not a directory and cannot be opened
+  reports os's errno at open, where it reported `ENOTDIR`: a file without
+  read permission gives `EACCES`, so `errors.Is(err, fs.ErrPermission)` now
+  holds, and a socket gives `ENXIO`. ReadDir works these out with `stat`
+  and `access` and never opens a name that is not a directory, so with Go
+  1.23 a FIFO fails with `readdirent` and `ENOTDIR` rather than blocking as
+  `os.ReadDir` would, and a device whose open would fail gives the same
+  error rather than the device's. An open or read interrupted by a signal
+  is retried, as os does.
 - `FileSystem.ReadDir` on Windows returns the errors `os.ReadDir` returns.
   It reported `ERROR_PATH_NOT_FOUND` for a missing name where `os.ReadDir`
   reports `ERROR_FILE_NOT_FOUND`, and `ERROR_DIRECTORY` for a regular file or

@@ -221,8 +221,11 @@ func (fs *FileSystem) Symlink(oldname, newname string) error {
 // directory is listed as fs.ModeSymlink. Only the slice returned with an
 // error may differ. On Linux a regular file fails as it does for os.ReadDir
 // in the Go release the package is built with: "open" from Go 1.24,
-// "readdirent" before. On Linux the directory is opened close-on-exec, as
-// os.Open does, so a child process started meanwhile does not inherit it.
+// "readdirent" before. With Go 1.23 on Linux, ReadDir never opens a name
+// that is not a directory, so a FIFO or a device whose open would fail gives
+// "readdirent" with ENOTDIR, where os.ReadDir blocks on the FIFO or reports
+// the device's open error. On Linux the directory is opened close-on-exec,
+// as os.Open does, so a child process started meanwhile does not inherit it.
 func (fs *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
 	nativePath := fs.toNativePath(name)
 	return readDirOptimized(nativePath)

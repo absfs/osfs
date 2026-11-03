@@ -13,6 +13,9 @@ import (
 // bufSize is larger than the default 8KB used by os.ReadDir for better performance
 const bufSize = 32 * 1024
 
+// getdents reads directory entries. Tests replace it to inject failures.
+var getdents = syscall.Getdents
+
 // readDirOptimized uses syscall.Getdents directly with a larger buffer for improved performance.
 // This avoids allocations and extracts d_type without calling lstat.
 //
@@ -30,7 +33,7 @@ func readDirOptimized(dirPath string) ([]fs.DirEntry, error) {
 	buf := make([]byte, bufSize)
 
 	for {
-		n, err := ignoringEINTR(func() (int, error) { return syscall.Getdents(fd, buf) })
+		n, err := ignoringEINTR(func() (int, error) { return getdents(fd, buf) })
 		if err != nil {
 			return nil, &os.PathError{Op: "readdirent", Path: dirPath, Err: err}
 		}
@@ -89,9 +92,10 @@ func readDirOptimized(dirPath string) ([]fs.DirEntry, error) {
 // openDir opens dirPath for getdents. Like os.Open it sets O_CLOEXEC, so a
 // process started while the directory is being read does not inherit the
 // descriptor, and it retries an open interrupted by a signal. O_DIRECTORY
-// keeps it from opening anything else; a FIFO would block. An ENOTDIR is
+// keeps it from opening anything else: opening a FIFO would block or release
+// a blocked writer, and opening a device can reset it. An ENOTDIR is
 // reported by notDirError, which gives the error os.ReadDir gives in the Go
-// release the package is built with.
+// release the package is built with, without opening dirPath.
 func openDir(dirPath string) (int, error) {
 	fd, err := openRetry(dirPath, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_DIRECTORY)
 	if err == nil {
