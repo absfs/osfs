@@ -29,12 +29,12 @@ jobs:
         run: go mod download
 
       - name: Run tests (with coverage)
-        if: matrix.os == 'ubuntu-latest'
+        shell: bash
         run: go test -v -race -coverprofile=coverage.out ./...
 
-      - name: Run tests
-        if: matrix.os != 'ubuntu-latest'
-        run: go test -v -race ./...
+      - name: Coverage summary
+        shell: bash
+        run: go tool cover -func=coverage.out | tail -1
 
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.go == '1.23'
