@@ -186,7 +186,27 @@ err = fs.MkdirAll("/path/to/nested/dirs", 0755)
 // Remove directories
 err = fs.Remove("/empty/dir")
 err = fs.RemoveAll("/path/to/dir")
+
+// List a directory, sorted by name
+entries, err := fs.ReadDir("/path/to/dir")
 ```
+
+`ReadDir` uses a faster native reader on Linux (`getdents` with a larger
+buffer) and Windows (`FindFirstFile`), but its entries and errors are the ones
+`os.ReadDir` gives, so `errors.Is(err, fs.ErrNotExist)` answers the same way.
+On Windows that includes the errno: a missing name is `ERROR_FILE_NOT_FOUND`
+and a regular file `ERROR_PATH_NOT_FOUND`, never `ERROR_DIRECTORY`, and a
+symlink to a directory is listed as a symlink. `File.ReadDir`, `Readdir` and
+`Readdirnames` are `os.File`'s own.
+
+### Native Paths
+
+absfs paths are Unix-style (`/c/Users/foo` on Windows), but osfs also accepts
+a native absolute path such as `C:\Users\foo` or `\\server\share`, and passes
+it to the OS unchanged. That is what lets [basefs](https://github.com/absfs/basefs)
+wrap osfs with a native directory, `basefs.NewFS(osfs, t.TempDir())`: it joins
+the native prefix to an absfs suffix (`C:\Users\foo/sub`), which Windows
+accepts. Converting with `osfs.FromNative` first is still the clearer choice.
 
 ### Additional Operations
 

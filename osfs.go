@@ -205,12 +205,20 @@ func (fs *FileSystem) Symlink(oldname, newname string) error {
 	return os.Symlink(ToNative(oldname), fs.toNativePath(newname))
 }
 
-// ReadDir reads the named directory and returns a list of directory entries.
+// ReadDir reads the named directory and returns its entries sorted by name.
 // Uses platform-specific optimizations for high-performance directory reading:
-// - Linux: syscall.Getdents with 32KB buffer (vs default 8KB)
-// - macOS: os.ReadDir (uses getattrlistbulk internally)
-// - Windows: FindFirstFileEx with optimizations
-// - Other platforms: os.ReadDir fallback
+//   - Linux: syscall.Getdents with a 32KB buffer (vs default 8KB)
+//   - macOS: os.ReadDir (uses getattrlistbulk internally)
+//   - Windows: FindFirstFile/FindNextFile
+//   - Other platforms: os.ReadDir
+//
+// Entries and errors are those os.ReadDir gives for the native path, so
+// errors.Is(err, fs.ErrNotExist) and the like answer the same way: a
+// missing name or a dangling symlink is fs.ErrNotExist, as is a regular
+// file on Windows (on Unix it is ENOTDIR). On Windows the errno is os's
+// too, and a symlink to a directory is listed as fs.ModeSymlink. On Linux
+// the errno is the same but the error's Op may differ ("open" rather than
+// "readdirent" for a regular file).
 func (fs *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
 	nativePath := fs.toNativePath(name)
 	return readDirOptimized(nativePath)
