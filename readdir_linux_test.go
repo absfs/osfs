@@ -3,11 +3,16 @@
 package osfs
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestDirentType(t *testing.T) {
@@ -48,5 +53,162 @@ func TestDirentType(t *testing.T) {
 					tc.dtype, tc.entry, mode, ok, err, tc.want, tc.wantOK, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestIgnoringEINTR(t *testing.T) {
+	calls := 0
+	n, err := ignoringEINTR(func() (int, error) {
+		calls++
+		if calls < 3 {
+			return -1, syscall.EINTR
+		}
+		return 7, nil
+	})
+	if n != 7 || err != nil || calls != 3 {
+		t.Errorf("ignoringEINTR = %d, %v after %d calls; want 7, nil after 3", n, err, calls)
+	}
+
+	calls = 0
+	_, err = ignoringEINTR(func() (int, error) {
+		calls++
+		return -1, syscall.EIO
+	})
+	if err != syscall.EIO || calls != 1 {
+		t.Errorf("ignoringEINTR = %v after %d calls; want EIO after 1", err, calls)
+	}
+}
+
+// childFDEnv names the descriptor TestChildFDHelper reports on.
+const childFDEnv = "OSFS_TEST_CHILD_FD"
+
+// TestChildFDHelper is not a test. Run as a child process by childFDTarget,
+// it prints what its descriptor $OSFS_TEST_CHILD_FD refers to, as seen in
+// /proc/self/fd, or "closed".
+func TestChildFDHelper(t *testing.T) {
+	n := os.Getenv(childFDEnv)
+	if n == "" {
+		t.Skip("helper process only")
+	}
+	target, err := os.Readlink("/proc/self/fd/" + n)
+	if err != nil {
+		target = "closed"
+	}
+	fmt.Printf("childfd=%s\n", target)
+}
+
+// childFDTarget starts this test binary as a child process and returns what
+// descriptor fd refers to in the child, or "closed" if the child did not
+// inherit it.
+func childFDTarget(t *testing.T, fd int) string {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestChildFDHelper$", "-test.count=1")
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=%d", childFDEnv, fd))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("child: %v\n%s", err, out)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if target, ok := strings.CutPrefix(line, "childfd="); ok {
+			return target
+		}
+	}
+	t.Fatalf("child printed no childfd line:\n%s", out)
+	return ""
+}
+
+// TestOpenDirCloseOnExec checks that a process started while ReadDir has its
+// directory open does not inherit the descriptor.
+func TestOpenDirCloseOnExec(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skipf("no /proc/self/fd: %v", err)
+	}
+	dir := t.TempDir()
+
+	// A descriptor opened without O_CLOEXEC must show up in the child, or
+	// the check below proves nothing.
+	leak, err := syscall.Open(dir, syscall.O_RDONLY|syscall.O_DIRECTORY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := childFDTarget(t, leak)
+	syscall.Close(leak)
+	if got != dir {
+		t.Skipf("child does not see an inherited descriptor (got %q), cannot test", got)
+	}
+
+	fd, err := openDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(fd)
+	if got := childFDTarget(t, fd); got == dir {
+		t.Errorf("child inherited openDir's descriptor %d for %s", fd, dir)
+	}
+}
+
+// TestReadDirNotDirectory checks the errors for names that are not
+// directories, which the getdents reader opens with O_DIRECTORY and os.Open
+// opens without it.
+func TestReadDirNotDirectory(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fifo := filepath.Join(dir, "fifo")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		path string
+		op   string
+		err  syscall.Errno
+	}{
+		{"regular file", file, "readdirent", syscall.ENOTDIR},
+		{"child of regular file", filepath.Join(file, "child"), "open", syscall.ENOTDIR},
+		// os.ReadDir would block opening a FIFO with no writer.
+		{"fifo", fifo, "readdirent", syscall.ENOTDIR},
+		{"missing", filepath.Join(dir, "nope"), "open", syscall.ENOENT},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			done := make(chan error, 1)
+			go func() {
+				_, err := readDirOptimized(tc.path)
+				done <- err
+			}()
+			var err error
+			select {
+			case err = <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatalf("readDirOptimized(%q) blocked", tc.path)
+			}
+			var pe *fs.PathError
+			if !errors.As(err, &pe) || pe.Op != tc.op || pe.Path != tc.path || pe.Err != tc.err {
+				t.Errorf("readDirOptimized(%q) = %#v; want PathError{%q, %q, %v}", tc.path, err, tc.op, tc.path, tc.err)
+			}
+		})
+	}
+}
+
+// TestReadDirUnreadable checks that a name that is not a directory and
+// cannot be opened fails at open with os's errno.
+func TestReadDirUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can open any file")
+	}
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o200); err != nil {
+		t.Fatal(err)
+	}
+	got, gotErr := readDirOptimized(file)
+	want, wantErr := os.ReadDir(file)
+	sameListing(t, "ReadDir", got, want, gotErr, wantErr)
+	var pe *fs.PathError
+	if !errors.As(gotErr, &pe) || pe.Op != "open" || pe.Err != syscall.EACCES {
+		t.Errorf("readDirOptimized(%q) = %#v; want PathError{open, EACCES}", file, gotErr)
 	}
 }

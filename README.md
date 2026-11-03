@@ -121,8 +121,8 @@ fs, err := osfs.NewFS()
 ```go
 // Open files
 f, err := fs.Open("/path/to/file.txt")
-f, err := fs.Create("/path/to/new.txt")
-f, err := fs.OpenFile("/path", os.O_RDWR|os.O_CREATE, 0644)
+f, err = fs.Create("/path/to/new.txt")
+f, err = fs.OpenFile("/path", os.O_RDWR|os.O_CREATE, 0644)
 
 // File info
 info, err := fs.Stat("/path/to/file.txt")
@@ -148,7 +148,8 @@ entries, err := fs.ReadDir("/path/to/dir")
 
 `ReadDir` uses a faster native reader on Linux (`getdents` with a larger
 buffer) and Windows (`FindFirstFile`), but its entries and errors are the ones
-`os.ReadDir` gives, so `errors.Is(err, fs.ErrNotExist)` answers the same way.
+`os.ReadDir` gives, op and errno included, so `errors.Is(err, fs.ErrNotExist)`
+answers the same way.
 On Windows that includes the errno: a missing name is `ERROR_FILE_NOT_FOUND`
 and a regular file `ERROR_PATH_NOT_FOUND`, never `ERROR_DIRECTORY`, and a
 symlink to a directory is listed as a symlink. `File.ReadDir`, `Readdir` and
@@ -193,15 +194,18 @@ err := fstools.Walk(fs, "/path", func(path string, info os.FileInfo, err error) 
 // Walk with options for different traversal strategies
 options := &fstools.Options{
     Sort:      true,
-    Traversal: fstools.BreadthTraversal,  // Also: PreOrder, PostOrder, KeyOrder
+    Traversal: fstools.BreadthTraversal, // Also: DepthTraversal, PreOrderTraversal, PostOrderTraversal, KeyTraversal
 }
-err = fstools.WalkWithOptions(fs, options, "/path", walkFunc)
+err = fstools.WalkWithOptions(fs, options, "/path", func(path string, info os.FileInfo, err error) error {
+    fmt.Println(path)
+    return err
+})
 ```
 
 The fstools package provides:
-- **Multiple traversal strategies**: PreOrder, PostOrder, BreadthFirst, and KeyOrder (files only)
+- **Multiple traversal strategies**: breadth-first, depth-first, pre-order, post-order, and key order (files only)
 - **Sorting options**: Custom sort functions or alphabetical
-- **Filesystem operations**: Copy, Describe, Diff, Patch, and Apply
+- **Filesystem operations**: Copy, ParallelCopy, Exists, Size, Count, and Equal
 - **Works with any absfs.Filer implementation**
 
 See [github.com/absfs/fstools](https://github.com/absfs/fstools) for complete documentation.

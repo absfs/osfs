@@ -217,10 +217,11 @@ func (fs *FileSystem) Symlink(oldname, newname string) error {
 // the current directory on C:), so errors.Is(err, fs.ErrNotExist) and the
 // like answer the same way: a missing name or a dangling symlink is
 // fs.ErrNotExist, as is a regular file on Windows (on Unix it is ENOTDIR).
-// On Windows the errno is os's too, and a symlink to a directory is listed
-// as fs.ModeSymlink. On Linux the errno is the same but the error's Op may
-// differ ("open" rather than "readdirent" for a regular file), as may the
-// slice returned with an error.
+// The error's Op and errno are os's too ("readdirent" with ENOTDIR for a
+// regular file on Linux), and on Windows a symlink to a directory is listed
+// as fs.ModeSymlink. Only the slice returned with an error may differ. On
+// Linux the directory is opened close-on-exec, as os.Open does, so a child
+// process started meanwhile does not inherit it.
 func (fs *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
 	nativePath := fs.toNativePath(name)
 	return readDirOptimized(nativePath)

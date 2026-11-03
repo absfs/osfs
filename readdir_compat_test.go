@@ -228,9 +228,8 @@ func TestReadDirSorted(t *testing.T) {
 var errKinds = []error{fs.ErrNotExist, fs.ErrExist, fs.ErrPermission, fs.ErrInvalid, fs.ErrClosed}
 
 // sameErr fails t unless got is equivalent to want, the os package's error:
-// both nil, or both *fs.PathError naming the same path, with the same errno
-// and the same errors.Is answer for each of errKinds. The Op may differ;
-// Linux's getdents reader fails a regular file at open, os at readdirent.
+// both nil, or both *fs.PathError with the same op and path, with the same
+// errno and the same errors.Is answer for each of errKinds.
 func sameErr(t *testing.T, what string, got, want error) {
 	t.Helper()
 	if (got == nil) != (want == nil) {
@@ -243,8 +242,8 @@ func sameErr(t *testing.T, what string, got, want error) {
 	var gpe, wpe *fs.PathError
 	if errors.As(got, &gpe) != errors.As(want, &wpe) {
 		t.Errorf("%s: error %#v, os gives %#v", what, got, want)
-	} else if wpe != nil && gpe.Path != wpe.Path {
-		t.Errorf("%s: error path %q, os gives %q", what, gpe.Path, wpe.Path)
+	} else if wpe != nil && (gpe.Op != wpe.Op || gpe.Path != wpe.Path) {
+		t.Errorf("%s: error op %q path %q, os gives op %q path %q", what, gpe.Op, gpe.Path, wpe.Op, wpe.Path)
 	}
 	var gno, wno syscall.Errno
 	if errors.As(got, &gno) != errors.As(want, &wno) || gno != wno {

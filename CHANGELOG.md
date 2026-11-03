@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- `FileSystem.ReadDir` on Linux opens the directory with `O_CLOEXEC`, as
+  `os.Open` does. A process started by another goroutine while a directory
+  was being read inherited the descriptor.
+- `FileSystem.ReadDir` on Linux reports os's error op: `readdirent` for a
+  read failure, where it said `getdents`, and `readdirent` with `ENOTDIR` for
+  a name that exists but is not a directory, where it said `open`. A FIFO
+  fails the same way instead of being opened, so it never blocks. An open or
+  read interrupted by a signal is retried, as os does.
 - `FileSystem.ReadDir` on Windows returns the errors `os.ReadDir` returns.
   It reported `ERROR_PATH_NOT_FOUND` for a missing name where `os.ReadDir`
   reports `ERROR_FILE_NOT_FOUND`, and `ERROR_DIRECTORY` for a regular file or
@@ -36,6 +44,11 @@
   and the current stable release with `GOTOOLCHAIN=local`. The matrix said
   1.21 and 1.22, but go.mod's `go 1.23` made those jobs download and run
   go1.23.0.
+- README: the fstools section names the traversal constants and operations
+  fstools has (`DepthTraversal`, `KeyTraversal`, `ParallelCopy`, `Exists`,
+  `Size`, `Count`, `Equal`) instead of ones it does not (`Describe`, `Diff`,
+  `Patch`, `Apply`), and the file-operations example no longer redeclares
+  `f`. Every README example was compiled against the package.
 - README: removed the `WindowsDriveMapper` documentation, which described an
   API the package no longer has, and documented the path rules instead.
 
