@@ -8,68 +8,90 @@ import (
 	"syscall"
 )
 
-// Windows syscall constants
-const (
-	findExInfoBasic      = 1
-	findFirstExLargeFetch = 2
-)
-
-// readDirOptimized uses FindFirstFileEx with FindExInfoBasic for faster enumeration.
-// FindExInfoBasic skips short file names which speeds up directory enumeration.
+// readDirOptimized lists dirPath with FindFirstFile/FindNextFile, which
+// returns each entry's name and attributes in one call per entry.
+//
+// Its errors are os.ReadDir's. FindFirstFile fails differently from
+// os.ReadDir: ERROR_PATH_NOT_FOUND for a missing name where os reports
+// ERROR_FILE_NOT_FOUND, and ERROR_DIRECTORY for a regular file or a dangling
+// symlink, which does not match fs.ErrNotExist. So any enumeration failure
+// is answered by os.ReadDir itself, which gives the same error (op, path and
+// errno) a caller of os.ReadDir would see, or the listing if the failure was
+// one os.ReadDir does not share. Failures are rare, so this costs nothing on
+// the common path.
 func readDirOptimized(dirPath string) ([]fs.DirEntry, error) {
-	// Use syscall for FindFirstFileEx with optimizations
-	pattern := dirPath + `\*`
-	patternp, err := syscall.UTF16PtrFromString(pattern)
+	patternp, err := syscall.UTF16PtrFromString(findPattern(dirPath))
 	if err != nil {
-		return nil, &os.PathError{Op: "readdir", Path: dirPath, Err: err}
+		return os.ReadDir(dirPath)
 	}
 
 	var fd syscall.Win32finddata
 	handle, err := syscall.FindFirstFile(patternp, &fd)
 	if err != nil {
-		if err == syscall.ERROR_FILE_NOT_FOUND {
-			return []fs.DirEntry{}, nil
-		}
-		return nil, &os.PathError{Op: "FindFirstFile", Path: dirPath, Err: err}
+		return os.ReadDir(dirPath)
 	}
 	defer syscall.FindClose(handle)
 
 	var entries []fs.DirEntry
-
 	for {
-		// Skip . and ..
 		name := syscall.UTF16ToString(fd.FileName[:])
 		if name != "." && name != ".." {
-			// Determine file type from attributes
-			var mode fs.FileMode
-			if fd.FileAttributes&syscall.FILE_ATTRIBUTE_DIRECTORY != 0 {
-				mode = fs.ModeDir
-			} else if fd.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-				// Reparse points include symlinks
-				mode = fs.ModeSymlink
-			}
-			// Regular files have mode 0
-
 			entries = append(entries, &dirEntry{
 				name:    name,
-				typ:     mode,
+				typ:     entryType(dirPath, name, fd.FileAttributes),
 				dirPath: dirPath,
 			})
 		}
 
 		err = syscall.FindNextFile(handle, &fd)
+		if err == syscall.ERROR_NO_MORE_FILES {
+			break
+		}
 		if err != nil {
-			if err == syscall.ERROR_NO_MORE_FILES {
-				break
-			}
-			return nil, &os.PathError{Op: "FindNextFile", Path: dirPath, Err: err}
+			return os.ReadDir(dirPath)
 		}
 	}
 
-	// Sort entries by name for consistency
 	sortDirEntries(entries)
-
+	if entries == nil {
+		entries = []fs.DirEntry{}
+	}
 	return entries, nil
+}
+
+// findPattern returns the FindFirstFile pattern matching every entry of
+// dirPath, without doubling a trailing separator ("C:\" gives "C:\*").
+func findPattern(dirPath string) string {
+	if n := len(dirPath); n > 0 && os.IsPathSeparator(dirPath[n-1]) {
+		return dirPath + "*"
+	}
+	return dirPath + `\*`
+}
+
+// entryType returns the fs.DirEntry type bits os.ReadDir would report for
+// an entry with the given attributes. Plain files and directories are
+// decided from the attributes. Reparse points (symlinks, junctions, dedup
+// and cloud files) are typed by os.Lstat, which applies the same reparse-tag
+// rules os.ReadDir does: a directory symlink is ModeSymlink, not ModeDir.
+func entryType(dirPath, name string, attrs uint32) fs.FileMode {
+	if attrs&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		if info, err := os.Lstat(joinNative(dirPath, name)); err == nil {
+			return info.Mode().Type()
+		}
+		// Gone since it was listed; report what the attributes say.
+	}
+	if attrs&syscall.FILE_ATTRIBUTE_DIRECTORY != 0 {
+		return fs.ModeDir
+	}
+	return 0
+}
+
+// joinNative appends name to dirPath with one separator between them.
+func joinNative(dirPath, name string) string {
+	if n := len(dirPath); n > 0 && os.IsPathSeparator(dirPath[n-1]) {
+		return dirPath + name
+	}
+	return dirPath + `\` + name
 }
 
 // dirEntry implements fs.DirEntry for optimized ReadDir
@@ -84,7 +106,7 @@ func (d *dirEntry) IsDir() bool       { return d.typ.IsDir() }
 func (d *dirEntry) Type() fs.FileMode { return d.typ }
 func (d *dirEntry) Info() (fs.FileInfo, error) {
 	// Lazy stat - only called when FileInfo is actually needed
-	return os.Lstat(d.dirPath + `\` + d.name)
+	return os.Lstat(joinNative(d.dirPath, d.name))
 }
 
 // sortDirEntries sorts directory entries by name
