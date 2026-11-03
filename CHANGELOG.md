@@ -14,8 +14,14 @@
   `fs.ModeSymlink`, as `os.ReadDir` does, instead of `fs.ModeDir`. Reparse
   points are typed by `os.Lstat`, so junctions and other reparse points get
   the type the os package gives them.
-- `FileSystem.ReadDir` on Windows no longer doubles a trailing separator in
-  the search pattern (`C:\` lists `C:\*`).
+- `FileSystem.ReadDir` on Windows lists a bare drive designator (`C:`) as
+  the current directory on that drive, as `os.ReadDir` and osfs's own `Stat`
+  do, instead of the drive root. Entries' `Info` resolve the same way.
+- `FileSystem.ReadDir` on Linux returns a non-nil empty slice for an empty
+  directory, as `os.ReadDir` does, instead of nil.
+- If a reparse point cannot be `Lstat`ed while it is listed on Windows,
+  `ReadDir` types it from its reparse tag (a directory symlink is
+  `fs.ModeSymlink`) instead of reporting it as a directory.
 - Native absolute paths (`C:\foo`, `C:/foo`, `\\server\share`) are passed to
   the OS unchanged instead of being read as relative absfs paths, so
   `basefs.NewFS(osfs, nativeDir)` works on Windows (commit de085c4, after
@@ -23,7 +29,15 @@
 
 ### Changed
 
-- CI measures coverage on Linux, macOS and Windows.
+- `FileSystem.ReadDir` on Windows no longer doubles a trailing separator in
+  its search pattern (`C:\` searches `C:\*`, not `C:\\*`). Windows accepted
+  the doubled form, so listings were already correct.
+- CI measures coverage on Linux, macOS and Windows, and tests Go 1.23, 1.24
+  and the current stable release with `GOTOOLCHAIN=local`. The matrix said
+  1.21 and 1.22, but go.mod's `go 1.23` made those jobs download and run
+  go1.23.0.
+- README: removed the `WindowsDriveMapper` documentation, which described an
+  API the package no longer has, and documented the path rules instead.
 
 ## v1.0.0
 

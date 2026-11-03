@@ -38,7 +38,7 @@ func readDirOptimized(dirPath string) ([]fs.DirEntry, error) {
 		if name != "." && name != ".." {
 			entries = append(entries, &dirEntry{
 				name:    name,
-				typ:     entryType(dirPath, name, fd.FileAttributes),
+				typ:     entryType(dirPath, name, fd.FileAttributes, fd.Reserved0),
 				dirPath: dirPath,
 			})
 		}
@@ -60,25 +60,27 @@ func readDirOptimized(dirPath string) ([]fs.DirEntry, error) {
 }
 
 // findPattern returns the FindFirstFile pattern matching every entry of
-// dirPath, without doubling a trailing separator ("C:\" gives "C:\*").
+// dirPath. It does not double a trailing separator, and it keeps a bare
+// drive designator drive-relative: "C:" lists the current directory on C:,
+// as os.ReadDir("C:") does, so its pattern is "C:*", not the root's "C:\*".
 func findPattern(dirPath string) string {
-	if n := len(dirPath); n > 0 && os.IsPathSeparator(dirPath[n-1]) {
-		return dirPath + "*"
-	}
-	return dirPath + `\*`
+	return joinNative(dirPath, "*")
 }
 
 // entryType returns the fs.DirEntry type bits os.ReadDir would report for
-// an entry with the given attributes. Plain files and directories are
-// decided from the attributes. Reparse points (symlinks, junctions, dedup
-// and cloud files) are typed by os.Lstat, which applies the same reparse-tag
-// rules os.ReadDir does: a directory symlink is ModeSymlink, not ModeDir.
-func entryType(dirPath, name string, attrs uint32) fs.FileMode {
+// an entry with the given attributes and reparse tag (the find data's
+// Reserved0). Plain files and directories are decided from the attributes.
+// Reparse points (symlinks, junctions, dedup and cloud files) are typed by
+// os.Lstat, which applies os.ReadDir's own reparse-tag rules, including the
+// winsymlink GODEBUG setting: a directory symlink is ModeSymlink, not
+// ModeDir. If Lstat fails (the entry was removed or replaced since it was
+// listed, or cannot be opened) the type comes from the tag instead.
+func entryType(dirPath, name string, attrs, tag uint32) fs.FileMode {
 	if attrs&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		if info, err := os.Lstat(joinNative(dirPath, name)); err == nil {
 			return info.Mode().Type()
 		}
-		// Gone since it was listed; report what the attributes say.
+		return reparseType(attrs, tag)
 	}
 	if attrs&syscall.FILE_ATTRIBUTE_DIRECTORY != 0 {
 		return fs.ModeDir
@@ -86,12 +88,50 @@ func entryType(dirPath, name string, attrs uint32) fs.FileMode {
 	return 0
 }
 
-// joinNative appends name to dirPath with one separator between them.
+// Reparse tags the syscall package does not name.
+const (
+	reparseTagDedup         = 0x80000013 // IO_REPARSE_TAG_DEDUP
+	reparseTagAFUnix        = 0x80000023 // IO_REPARSE_TAG_AF_UNIX
+	reparseTagNameSurrogate = 0x20000000 // IsReparseTagNameSurrogate bit
+)
+
+// reparseType returns the type bits the os package (Go 1.23 and later, with
+// the default winsymlink setting) gives a reparse point with these
+// attributes and tag. A name surrogate (symlink, junction) is never a
+// directory; a symlink is ModeSymlink, an AF_UNIX socket ModeSocket, a dedup
+// file a plain file or directory, and any other tag ModeIrregular.
+func reparseType(attrs, tag uint32) fs.FileMode {
+	var m fs.FileMode
+	if tag&reparseTagNameSurrogate == 0 && attrs&syscall.FILE_ATTRIBUTE_DIRECTORY != 0 {
+		m |= fs.ModeDir
+	}
+	switch tag {
+	case syscall.IO_REPARSE_TAG_SYMLINK:
+		m |= fs.ModeSymlink
+	case reparseTagAFUnix:
+		m |= fs.ModeSocket
+	case reparseTagDedup:
+		// Treated as the plain file or directory it stands for.
+	default:
+		m |= fs.ModeIrregular
+	}
+	return m
+}
+
+// joinNative appends name to dirPath with one separator between them. A
+// bare drive designator ("C:") gets none, so "C:name" stays relative to the
+// current directory on that drive, as it is for the os package.
 func joinNative(dirPath, name string) string {
-	if n := len(dirPath); n > 0 && os.IsPathSeparator(dirPath[n-1]) {
+	n := len(dirPath)
+	if (n > 0 && os.IsPathSeparator(dirPath[n-1])) || isDriveDesignator(dirPath) {
 		return dirPath + name
 	}
 	return dirPath + `\` + name
+}
+
+// isDriveDesignator reports whether p is a drive letter and colon alone.
+func isDriveDesignator(p string) bool {
+	return len(p) == 2 && p[1] == ':'
 }
 
 // dirEntry implements fs.DirEntry for optimized ReadDir

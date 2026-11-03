@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main, master]
 
+# go.mod's go line is the oldest version tested. GOTOOLCHAIN=local makes a
+# job fail rather than silently download a newer toolchain, so each job runs
+# the Go version its name says.
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   test:
     name: Test
@@ -14,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go: ['1.21', '1.22', '1.23']
+        go: ['1.23', '1.24', 'stable']
 
     steps:
       - name: Checkout code
@@ -24,6 +30,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
+
+      - name: Go version
+        run: go version
 
       - name: Download dependencies
         run: go mod download

@@ -11,7 +11,7 @@
 
 - **Native OS Access**: Direct access to your operating system's filesystem
 - **Cross-Platform Support**: Works on Unix, macOS, and Windows
-- **Windows Drive Mapping**: `WindowsDriveMapper` for seamless Unix-style paths on Windows
+- **Unix-Style Paths Everywhere**: `/c/Users/foo` on Windows, with `FromNative`/`ToNative` to convert
 - **Full absfs Compatibility**: Implements the complete absfs.FileSystem interface
 
 ## Install
@@ -52,83 +52,41 @@ func main() {
 }
 ```
 
-### Cross-Platform Applications
+## Paths
 
-For applications that need to work across Unix and Windows, use the build tag pattern with `WindowsDriveMapper`:
+absfs paths are Unix-style on every OS, so the same code runs on Unix and
+Windows. On Windows a drive is a lowercase first element and a UNC share
+starts with two slashes:
 
-**Create `filesystem_windows.go`:**
-```go
-//go:build windows
+| absfs path           | Windows path          | Notes                                           |
+| -------------------- | --------------------- | ----------------------------------------------- |
+| `/c/config/app.json` | `C:\config\app.json`  | Drive letter as the first element               |
+| `/config/app.json`   | `C:\config\app.json`  | No drive: the drive of osfs's working directory |
+| `//server/share/f`   | `\\server\share\f`    | UNC path                                        |
+| `relative/path`      | `<cwd>\relative\path` | Joined to osfs's working directory              |
+| `C:\Windows\file`    | `C:\Windows\file`     | Native absolute path: passed through unchanged  |
 
-package myapp
-
-import "github.com/absfs/osfs"
-
-func NewFS(drive string) absfs.FileSystem {
-	if drive == "" {
-		drive = "C:"
-	}
-	fs, _ := osfs.NewFS()
-	return osfs.NewWindowsDriveMapper(fs, drive)
-}
-```
-
-**Create `filesystem_unix.go`:**
-```go
-//go:build !windows
-
-package myapp
-
-import "github.com/absfs/osfs"
-
-func NewFS(drive string) absfs.FileSystem {
-	fs, _ := osfs.NewFS()
-	return fs
-}
-```
-
-**Use it everywhere:**
-```go
-package main
-
-import "myapp"
-
-func main() {
-	fs := myapp.NewFS("")
-
-	// Works identically on all platforms!
-	fs.Create("/config/app.json")      // → /config/app.json on Unix, C:\config\app.json on Windows
-	fs.MkdirAll("/var/log/app", 0755)  // → /var/log/app on Unix, C:\var\log\app on Windows
-}
-```
-
-See the [absfs PATH_HANDLING.md](https://github.com/absfs/absfs/blob/master/PATH_HANDLING.md) guide for complete cross-platform patterns.
-
-## WindowsDriveMapper
-
-The `WindowsDriveMapper` enables Unix-style absolute paths on Windows by translating virtual-absolute paths to Windows drive paths:
+On Unix the absfs path is the native path. Convert explicitly with
+`osfs.FromNative` and `osfs.ToNative`; `SplitDrive`, `GetDrive`, `SetDrive`,
+`IsUNC` and `SplitUNC` take paths apart.
 
 ```go
 fs, _ := osfs.NewFS()
-mapped := osfs.NewWindowsDriveMapper(fs, "C:")
 
-// Unix-style paths work on Windows
-mapped.Create("/tmp/config.json")    // Creates C:\tmp\config.json
-mapped.MkdirAll("/var/log", 0755)    // Creates C:\var\log
-
-// OS-absolute paths pass through unchanged
-mapped.Open("C:\\Windows\\file.txt") // Opens C:\Windows\file.txt
-mapped.Open("\\\\server\\share\\f")  // Opens UNC path \\server\share\f
+dir := osfs.FromNative(os.TempDir()) // "/c/Users/me/AppData/Local/Temp" on Windows
+fs.MkdirAll(dir+"/app/logs", 0755)
+fs.Create(dir + "/app/config.json")
 ```
 
-### Path Translation Rules
+### Native Paths
 
-| Input Path | Windows Result | Notes |
-|------------|----------------|-------|
-| `/config/app.json` | `C:\config\app.json` | Virtual-absolute → mapped to drive |
-| `C:\Windows\file` | `C:\Windows\file` | OS-absolute → pass through |
-| `\\server\share\f` | `\\server\share\f` | UNC path → pass through |
-| `relative/path` | `relative\path` | Relative → pass through |
+osfs also accepts a native absolute path such as `C:\Users\foo` or
+`\\server\share`, and passes it to the OS unchanged; a bare drive designator
+(`C:`) means the current directory on that drive, as it does for the os
+package. That is what lets [basefs](https://github.com/absfs/basefs) wrap
+osfs with a native directory, `basefs.NewFS(osfs, t.TempDir())`: it joins the
+native prefix to an absfs suffix (`C:\Users\foo/sub`), which Windows accepts.
+Converting with `osfs.FromNative` first is still the clearer choice.
 
 ## Symbolic Links
 
@@ -156,9 +114,6 @@ info, _ := fs.Lstat("/path/to/link")
 ```go
 // Standard OS filesystem
 fs, err := osfs.NewFS()
-
-// With Windows drive mapping (Windows only)
-mapped := osfs.NewWindowsDriveMapper(fs, "D:")
 ```
 
 ### File Operations
@@ -199,15 +154,6 @@ and a regular file `ERROR_PATH_NOT_FOUND`, never `ERROR_DIRECTORY`, and a
 symlink to a directory is listed as a symlink. `File.ReadDir`, `Readdir` and
 `Readdirnames` are `os.File`'s own.
 
-### Native Paths
-
-absfs paths are Unix-style (`/c/Users/foo` on Windows), but osfs also accepts
-a native absolute path such as `C:\Users\foo` or `\\server\share`, and passes
-it to the OS unchanged. That is what lets [basefs](https://github.com/absfs/basefs)
-wrap osfs with a native directory, `basefs.NewFS(osfs, t.TempDir())`: it joins
-the native prefix to an absfs suffix (`C:\Users\foo/sub`), which Windows
-accepts. Converting with `osfs.FromNative` first is still the clearer choice.
-
 ### Additional Operations
 
 ```go
@@ -223,10 +169,6 @@ err = fs.Chown("/path/to/file", uid, gid)
 err = fs.Chdir("/new/directory")
 cwd, err := fs.Getwd()
 ```
-
-## Examples
-
-See [example_drivemapper_test.go](example_drivemapper_test.go) for complete Windows drive mapping examples.
 
 ## Advanced Operations
 

@@ -105,8 +105,11 @@ type pathForm struct {
 
 // pathForms returns the ways a caller can name native path p to osfs: as an
 // absfs path, and (on Windows, where they differ) as the native path itself
-// and as basefs builds it, a native prefix joined to an absfs suffix with
-// path.Join, which osfs passes through unchanged.
+// and in the mixed form basefs produces, a native prefix and an absfs suffix
+// joined by "/", which osfs passes through unchanged. The mixed form is
+// built by concatenation, so a trailing "/" survives; basefs uses path.Join,
+// which would drop it, so the trailing-separator mixed cases are stricter
+// than anything basefs sends.
 func pathForms(root, rel, p string) map[string]pathForm {
 	forms := map[string]pathForm{"absfs": {FromNative(p), p}}
 	if FromNative(p) != p {
@@ -139,8 +142,7 @@ func TestReadDirMatchesOS(t *testing.T) {
 				t.Run(form, func(t *testing.T) {
 					got, gotErr := ofs.ReadDir(pf.name)
 					want, wantErr := os.ReadDir(pf.native)
-					sameErr(t, "ReadDir", gotErr, wantErr)
-					sameEntries(t, "ReadDir", got, want)
+					sameListing(t, "ReadDir", got, want, gotErr, wantErr)
 
 					// Each File method gets fresh handles, so a failed read
 					// on one cannot leave the next reading from mid-listing.
@@ -165,8 +167,7 @@ func TestReadDirMatchesOS(t *testing.T) {
 					if gf, wf, ok := open("File.ReadDir"); ok {
 						got, gotErr := gf.ReadDir(-1)
 						want, wantErr := wf.ReadDir(-1)
-						sameErr(t, "File.ReadDir", gotErr, wantErr)
-						sameEntries(t, "File.ReadDir", got, want)
+						sameListing(t, "File.ReadDir", got, want, gotErr, wantErr)
 					}
 					if gf, wf, ok := open("File.Readdir"); ok {
 						got, gotErr := gf.Readdir(-1)
@@ -278,6 +279,19 @@ func sameEntries(t *testing.T, what string, got, want []fs.DirEntry) {
 			t.Errorf("%s: Info %q mode %v, os gives %q mode %v", what, gi.Name(), gi.Mode(), wi.Name(), wi.Mode())
 		}
 	}
+}
+
+// sameListing is sameErr then sameEntries, and for a successful read also
+// requires got to be nil exactly when want is: os.ReadDir lists an empty
+// directory as a non-nil empty slice. The slice that comes with an error is
+// not compared; os's depends on which syscall failed.
+func sameListing(t *testing.T, what string, got, want []fs.DirEntry, gotErr, wantErr error) {
+	t.Helper()
+	sameErr(t, what, gotErr, wantErr)
+	if gotErr == nil && wantErr == nil && (got == nil) != (want == nil) {
+		t.Errorf("%s: entries nil=%v, os gives nil=%v", what, got == nil, want == nil)
+	}
+	sameEntries(t, what, got, want)
 }
 
 func sameNames(t *testing.T, what string, got, want []string) {

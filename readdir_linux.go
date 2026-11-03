@@ -75,7 +75,10 @@ func readDirOptimized(dirPath string) ([]fs.DirEntry, error) {
 
 	// Sort entries by name for consistency with os.ReadDir
 	sortDirEntries(entries)
-
+	if entries == nil {
+		// Like os.ReadDir, never return a nil slice for an empty directory.
+		entries = []fs.DirEntry{}
+	}
 	return entries, nil
 }
 
