@@ -107,6 +107,52 @@ info, _ := fs.Lstat("/path/to/link")
 
 **Windows users**: Symlinks require elevated privileges or Developer Mode. See [SYMLINKS.md](SYMLINKS.md) for configuration instructions and platform-specific behavior.
 
+## Confining to a Directory (RootFS)
+
+`osfs.FileSystem` hands every name to the OS, and the OS follows symbolic
+links in every element of a path. A link inside a directory can therefore
+lead an operation outside it, whoever made the link: a relative link moved
+somewhere shallower, a link to `..`, an absolute link, or a directory swapped
+for a link while a program walks it.
+
+`RootFS` closes that. It resolves every name through an
+[`os.Root`](https://pkg.go.dev/os#Root), so the host never follows a link out
+of the root directory:
+
+```go
+o, _ := osfs.NewFS()
+sfs, err := o.OpenRoot("/srv/workspaces/a") // or osfs.NewRootFS(dir)
+if err != nil {
+	log.Fatal(err) // errors.ErrUnsupported before Go 1.25 or off Unix
+}
+defer sfs.(*osfs.RootFS).Close()
+
+data, err := sfs.ReadFile("/srv/workspaces/a/link") // errors.Is(err, osfs.ErrPathEscapes) if link leads out
+```
+
+- Names are those osfs takes: absolute host paths, or names relative to the
+  RootFS's working directory (which starts at the root). A name outside the
+  root fails with an `*os.PathError` wrapping `osfs.ErrPathEscapes`.
+- A relative link, `..` included, is followed only while it stays inside the
+  root; one that leads out fails with `ErrPathEscapes`.
+- `os.Root` refuses every absolute link. RootFS follows an absolute link
+  whose target, as written, is the root's path (as given, or with symlinks
+  evaluated) or lies below it, inside the root. Any other absolute target
+  fails with `ErrPathEscapes`.
+- `Symlink` stores targets verbatim and `Readlink` returns them verbatim.
+- `TempDir` is the OS's, as for osfs, and usually outside the root.
+- With `O_NOFOLLOW`, `OpenFile` fails with `ELOOP` on a final link.
+
+[basefs](https://github.com/absfs/basefs) uses `OpenRoot` automatically when
+its underlying filesystem is osfs.
+
+**Requirements.** `RootFS` and `NewRootFS` need Go 1.25 (the release that
+gave `os.Root` `Rename`, `Symlink`, `Readlink`, `Chmod` and the rest) on a
+Unix system. osfs itself still builds with Go 1.23, and on any platform;
+there, and on Windows, `FileSystem.OpenRoot` returns an error wrapping
+`errors.ErrUnsupported`. `os.Root`'s own limits apply: it does not stop
+traversal of mount points or access to device files.
+
 ## API Overview
 
 ### Creating Filesystems

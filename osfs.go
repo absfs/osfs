@@ -10,6 +10,10 @@ import (
 	"github.com/absfs/absfs"
 )
 
+// ErrPathEscapes is wrapped by the error a RootFS returns for a name, or a
+// symlink on the way to one, that leads outside its root.
+var ErrPathEscapes = errors.New("path escapes from root")
+
 // FileSystem implements absfs.SymlinkFileSystem using the host OS filesystem.
 // All paths are Unix-style (forward slashes) for consistency with absfs conventions.
 // On Windows, drive letters are represented as /c/, /d/, etc.
@@ -236,6 +240,17 @@ func (fs *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
 func (fs *FileSystem) ReadFile(name string) ([]byte, error) {
 	nativePath := fs.toNativePath(name)
 	return os.ReadFile(nativePath)
+}
+
+// OpenRoot returns a filesystem confined to the directory dir by os.Root: a
+// *RootFS, which takes the same names as osfs but never lets the host follow
+// a symlink out of dir. dir is resolved like any other osfs name.
+//
+// RootFS requires Go 1.25 or later on a Unix system. Elsewhere OpenRoot
+// returns an *os.PathError wrapping errors.ErrUnsupported, so a caller can
+// fall back to the unconfined FileSystem knowingly, as basefs does.
+func (fs *FileSystem) OpenRoot(dir string) (absfs.SymlinkFileSystem, error) {
+	return openRoot(fs.toNativePath(dir))
 }
 
 // Sub returns an fs.FS corresponding to the subtree rooted at dir.

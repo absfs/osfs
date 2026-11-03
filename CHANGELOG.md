@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Security
+
+- `RootFS`, from `NewRootFS(dir)` or `FileSystem.OpenRoot(dir)`, is a
+  `SymlinkFileSystem` confined to `dir` by `os.Root`: the host never follows
+  a symlink out of it. Through `FileSystem`, a link inside a directory leads
+  the host wherever it points, so a relative link moved shallower, a link to
+  `..`, an absolute link, or a directory swapped for a link mid-walk can make
+  an operation read, write, truncate or chmod a file outside. Through
+  `RootFS` each of those fails with `ErrPathEscapes`. An absolute link whose
+  target lies inside the root is still followed, inside the root.
+  `RootFS` needs Go 1.25 on Unix; elsewhere `OpenRoot` returns an error
+  wrapping `errors.ErrUnsupported`, and osfs still builds with Go 1.23.
+
+### Added
+
+- `RootFS`, `NewRootFS`, `FileSystem.OpenRoot` and `ErrPathEscapes`.
+
 ### Fixed
 
 - `FileSystem.ReadDir` on Linux opens the directory with `O_CLOEXEC`, as
